@@ -27,3 +27,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     </html>
   );
 }
+
+import Navbar from "@/components/navbar";
+// ...
+<body>
+  <Navbar />
+  {children}
+</body>
