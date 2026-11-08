@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { buatBooking } from "./actions";
+import { bayarBooking } from "./pembayaran";
 
 type AlatItem = {
   id: string;
@@ -24,6 +25,7 @@ export default function BookingForm({ alat }: { alat: AlatItem[] }) {
   const [setujuKetentuan, setSetujuKetentuan] = useState(false);
   const [loading, setLoading] = useState(false);
   const [pesan, setPesan] = useState<{ tipe: "error" | "sukses"; teks: string } | null>(null);
+  const [bookingId, setBookingId] = useState<string | null>(null);
 
   function ubahJumlah(alatId: string, nilai: number) {
     setJumlah((prev) => ({ ...prev, [alatId]: Math.max(0, nilai) }));
@@ -53,10 +55,24 @@ export default function BookingForm({ alat }: { alat: AlatItem[] }) {
       return;
     }
 
+    setBookingId(hasil.bookingId);
     setPesan({
       tipe: "sukses",
-      teks: `Booking berhasil dibuat. Kode booking: ${hasil.bookingId}. Lanjut ke pembayaran Rp20.000.`,
+      teks: `Booking berhasil dibuat. Kode booking: ${hasil.bookingId}. Silakan lakukan pembayaran Rp20.000.`,
     });
+  }
+
+  async function handleBayar() {
+    if (!bookingId) return;
+    setLoading(true);
+    const hasil = await bayarBooking(bookingId);
+    setLoading(false);
+
+    if (!hasil.ok) {
+      setPesan({ tipe: "error", teks: hasil.error });
+      return;
+    }
+    window.location.href = hasil.redirectUrl;
   }
 
   return (
@@ -143,6 +159,17 @@ export default function BookingForm({ alat }: { alat: AlatItem[] }) {
       >
         {loading ? "Memproses..." : "Booking sekarang"}
       </button>
+
+      {bookingId && (
+        <button
+          type="button"
+          onClick={handleBayar}
+          disabled={loading}
+          className="rounded bg-green-700 p-3 text-white disabled:opacity-50"
+        >
+          {loading ? "Memproses..." : "Bayar Rp20.000 sekarang"}
+        </button>
+      )}
 
       {pesan && (
         <p className={pesan.tipe === "error" ? "text-red-600" : "text-green-700"}>
