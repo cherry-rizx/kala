@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { buatBooking } from "./actions";
 import { bayarBooking } from "./pembayaran";
-
+import { batalkanBooking } from "./batal";
 type AlatItem = {
   id: string;
   nama: string;
@@ -74,6 +74,27 @@ export default function BookingForm({ alat }: { alat: AlatItem[] }) {
     }
     window.location.href = hasil.redirectUrl;
   }
+
+  async function handleBatal() {
+  if (!bookingId) return;
+  setLoading(true);
+  const hasil = await batalkanBooking(bookingId);
+  setLoading(false);
+
+  if (!hasil.ok) {
+    setPesan({ tipe: "error", teks: hasil.error });
+    return;
+  }
+
+  setPesan({
+    tipe: "sukses",
+    teks:
+      hasil.status === "dibatalkan"
+        ? `Booking dibatalkan. Refund: Rp${hasil.refund.toLocaleString("id-ID")}.`
+        : "Booking hangus, tidak ada refund karena pembatalan kurang dari H-7.",
+  });
+  setBookingId(null);
+}
 
   return (
     <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-6">
@@ -161,14 +182,14 @@ export default function BookingForm({ alat }: { alat: AlatItem[] }) {
       </button>
 
       {bookingId && (
-        <button
-          type="button"
-          onClick={handleBayar}
-          disabled={loading}
-          className="rounded bg-green-700 p-3 text-white disabled:opacity-50"
-        >
-          {loading ? "Memproses..." : "Bayar Rp20.000 sekarang"}
-        </button>
+      <button
+      type="button"
+      onClick={handleBayar}
+      disabled={loading}
+      className="rounded bg-green-700 p-3 text-white disabled:opacity-50"
+      >
+      {loading ? "Memproses..." : "Bayar Rp20.000 sekarang"}
+      </button>
       )}
 
       {pesan && (

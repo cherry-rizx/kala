@@ -7,6 +7,7 @@ export default function Navbar() {
       <div className="flex gap-6 text-sm">
         <Link href="/booking" className="hover:underline">Booking</Link>
         <Link href="/admin" className="hover:underline">Admin</Link>
+        <Link href="/riwayat" className="hover:underline">Riwayat</Link>
       </div>
     </nav>
   );
