@@ -3,6 +3,7 @@
 import { createSessionClient, getCurrentUser } from "@/lib/supabase/session";
 import { createAdminClient } from "@/lib/supabase/server";
 import { hitungRefund } from "@/lib/booking/rules";
+import { refundMidtrans } from "@/lib/midtrans/refund";
 
 type HasilBatal =
   | { ok: true; status: "dibatalkan" | "hangus"; refund: number }
@@ -15,9 +16,10 @@ export async function batalkanBooking(bookingId: string): Promise<HasilBatal> {
   const supabase = await createSessionClient();
   const { data: booking, error } = await supabase
     .from("booking")
-    .select("id, status, tanggal_mulai, jumlah_booking")
+    .select("id, status, tanggal_mulai, jumlah_booking, midtrans_order_id")
     .eq("id", bookingId)
     .single();
+    
 
   if (error || !booking) return { ok: false, error: "Booking tidak ditemukan" };
 
@@ -31,11 +33,22 @@ export async function batalkanBooking(bookingId: string): Promise<HasilBatal> {
       : hitungRefund(new Date(`${booking.tanggal_mulai}T00:00:00`), new Date(), booking.jumlah_booking);
 
   const statusBaru = booking.status === "menunggu_bayar" || refund > 0 ? "dibatalkan" : "hangus";
+    if (booking.status === "terkonfirmasi" && refund > 0) {
+    const hasilRefund = await refundMidtrans({
+      orderId: booking.midtrans_order_id!,
+      refundKey: `refund-${booking.id}`,
+      amount: refund,
+      reason: "Pembatalan booking KALA",
+    });
+    if (!hasilRefund.ok) {
+      return { ok: false, error: "Refund ke Midtrans gagal, coba lagi nanti" };
+    }
+  }
 
   const admin = createAdminClient();
   const { data: updated, error: errUpdate } = await admin
     .from("booking")
-    .update({ status: statusBaru, updated_at: new Date().toISOString() })
+   .update({status: statusBaru,updated_at: new Date().toISOString(),refund_jumlah: refund,refund_at: refund > 0 ? new Date().toISOString() : null,})
     .eq("id", booking.id)
     .eq("status", booking.status)
     .select("id");

@@ -1,5 +1,5 @@
 const BIAYA_BOOKING = 20000;
-const MIN_HARI_REFUND = 7;
+const MIN_HARI_REFUND = 8;
 
 export function hitungHariSelisih(tanggalSewa: Date, tanggalBatal: Date): number {
   const msPerHari = 24 * 60 * 60 * 1000;
