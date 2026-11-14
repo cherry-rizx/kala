@@ -18,7 +18,7 @@ export default function LoginPage() {
     setLoading(true);
     setPesan(null);
 
-    const { error } =
+    const { data, error } =
       mode === "login"
         ? await supabase.auth.signInWithPassword({ email, password })
         : await supabase.auth.signUp({ email, password });
@@ -30,7 +30,8 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/booking");
+    const role = data.user?.app_metadata?.role;
+    router.push(role === "admin" ? "/admin" : "/booking");
     router.refresh();
   }
 
@@ -74,9 +75,7 @@ export default function LoginPage() {
         onClick={() => setMode(mode === "login" ? "daftar" : "login")}
         className="mt-6 text-sm underline"
       >
-        {mode === "login"
-          ? "Belum punya akun? Daftar"
-          : "Sudah punya akun? Login"}
+        {mode === "login" ? "Belum punya akun? Daftar" : "Sudah punya akun? Login"}
       </button>
     </main>
   );

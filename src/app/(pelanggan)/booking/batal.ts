@@ -19,7 +19,6 @@ export async function batalkanBooking(bookingId: string): Promise<HasilBatal> {
     .select("id, status, tanggal_mulai, jumlah_booking, midtrans_order_id")
     .eq("id", bookingId)
     .single();
-    
 
   if (error || !booking) return { ok: false, error: "Booking tidak ditemukan" };
 
@@ -30,25 +29,41 @@ export async function batalkanBooking(bookingId: string): Promise<HasilBatal> {
   const refund =
     booking.status === "menunggu_bayar"
       ? 0
-      : hitungRefund(new Date(`${booking.tanggal_mulai}T00:00:00`), new Date(), booking.jumlah_booking);
+      : hitungRefund(
+          new Date(`${booking.tanggal_mulai}T00:00:00`),
+          new Date(),
+          booking.jumlah_booking
+        );
 
   const statusBaru = booking.status === "menunggu_bayar" || refund > 0 ? "dibatalkan" : "hangus";
-    if (booking.status === "terkonfirmasi" && refund > 0) {
+
+  if (booking.status === "terkonfirmasi" && refund > 0) {
     const hasilRefund = await refundMidtrans({
       orderId: booking.midtrans_order_id!,
       refundKey: `refund-${booking.id}`,
       amount: refund,
       reason: "Pembatalan booking KALA",
     });
+
     if (!hasilRefund.ok) {
-      return { ok: false, error: "Refund ke Midtrans gagal, coba lagi nanti" };
+      const pesanMidtrans =
+        hasilRefund.json?.status_message ?? hasilRefund.json?.error ?? "tidak ada pesan";
+      return {
+        ok: false,
+        error: `Refund gagal (HTTP ${hasilRefund.status}): ${pesanMidtrans}`,
+      };
     }
   }
 
   const admin = createAdminClient();
   const { data: updated, error: errUpdate } = await admin
     .from("booking")
-   .update({status: statusBaru,updated_at: new Date().toISOString(),refund_jumlah: refund,refund_at: refund > 0 ? new Date().toISOString() : null,})
+    .update({
+      status: statusBaru,
+      updated_at: new Date().toISOString(),
+      refund_jumlah: refund,
+      refund_at: refund > 0 ? new Date().toISOString() : null,
+    })
     .eq("id", booking.id)
     .eq("status", booking.status)
     .select("id");

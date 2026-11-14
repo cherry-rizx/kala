@@ -18,7 +18,7 @@ export async function createSessionClient() {
               cookieStore.set(name, value, options)
             );
           } catch {
-            // Dipanggil dari Server Component: cookie hanya bisa diubah di Server Action atau Route Handler
+            // Dipanggil dari Server Component, cookie hanya bisa diubah di Server Action atau Route Handler
           }
         },
       },

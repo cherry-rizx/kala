@@ -31,5 +31,5 @@ export async function refundMidtrans(params: {
   );
 
   const json = await res.json();
-  return { ok: res.ok, json };
+  return { ok: res.ok, status: res.status, json };
 }

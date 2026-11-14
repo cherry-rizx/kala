@@ -21,19 +21,23 @@ export default function RiwayatList({ bookings }: { bookings: Booking[] }) {
   async function handleBatal(id: string) {
     setLoadingId(id);
     setPesan(null);
-    const hasil = await batalkanBooking(id);
-    setLoadingId(null);
-
-    if (!hasil.ok) {
-      setPesan(hasil.error);
-      return;
+    try {
+      const hasil = await batalkanBooking(id);
+      if (!hasil.ok) {
+        setPesan(hasil.error);
+        return;
+      }
+      setPesan(
+        hasil.status === "dibatalkan"
+          ? `Booking dibatalkan. Refund: Rp${hasil.refund.toLocaleString("id-ID")}.`
+          : "Booking hangus, tidak ada refund karena pembatalan H-7 atau kurang."
+      );
+      router.refresh();
+    } catch {
+      setPesan("Terjadi error saat membatalkan, coba lagi.");
+    } finally {
+      setLoadingId(null);
     }
-    setPesan(
-      hasil.status === "dibatalkan"
-        ? `Booking dibatalkan. Refund: Rp${hasil.refund.toLocaleString("id-ID")}.`
-        : "Booking hangus, tidak ada refund karena pembatalan kurang dari H-7."
-    );
-    router.refresh();
   }
 
   if (bookings.length === 0) {
