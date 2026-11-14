@@ -4,6 +4,7 @@ import { connection } from "next/server";
 import { createSessionClient, getCurrentUser } from "@/lib/supabase/session";
 import TombolRefund from "./tombol-refund";
 import TombolLokasi from "./tombol-lokasi";
+import TombolKembali from "./tombol-kembali";
 
 async function DaftarBooking() {
   await connection();
@@ -15,7 +16,7 @@ async function DaftarBooking() {
   const supabase = await createSessionClient();
   const { data, error } = await supabase
     .from("booking")
-    .select("id, nama_pelanggan, status, tanggal_mulai, tanggal_selesai, refund_jumlah")
+    .select("id, nama_pelanggan, status, tanggal_mulai, tanggal_selesai, refund_jumlah, denda_jumlah")
     .order("tanggal_mulai", { ascending: false });
 
   if (error) return <p className="text-red-600">Gagal memuat data: {error.message}</p>;
@@ -32,7 +33,11 @@ async function DaftarBooking() {
           {b.refund_jumlah ? (
             <p className="text-sm text-gray-600">Refund: Rp{Number(b.refund_jumlah).toLocaleString("id-ID")}</p>
           ) : null}
+          {b.denda_jumlah ? (
+            <p className="text-sm text-gray-600">Denda: Rp{Number(b.denda_jumlah).toLocaleString("id-ID")}</p>
+          ) : null}
           {b.status === "terkonfirmasi" && <TombolLokasi bookingId={b.id} />}
+          {b.status === "sedang_disewa" && <TombolKembali bookingId={b.id} />}
           {b.status === "menunggu_refund" && <TombolRefund bookingId={b.id} />}
         </div>
       ))}
