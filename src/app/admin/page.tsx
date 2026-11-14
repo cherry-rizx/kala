@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { createSessionClient, getCurrentUser } from "@/lib/supabase/session";
 import TombolRefund from "./tombol-refund";
+import TombolLokasi from "./tombol-lokasi";
 
 async function DaftarBooking() {
   await connection();
@@ -31,6 +32,7 @@ async function DaftarBooking() {
           {b.refund_jumlah ? (
             <p className="text-sm text-gray-600">Refund: Rp{Number(b.refund_jumlah).toLocaleString("id-ID")}</p>
           ) : null}
+          {b.status === "terkonfirmasi" && <TombolLokasi bookingId={b.id} />}
           {b.status === "menunggu_refund" && <TombolRefund bookingId={b.id} />}
         </div>
       ))}

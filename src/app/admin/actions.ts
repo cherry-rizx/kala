@@ -54,3 +54,41 @@ export async function konfirmasiRefundManual(bookingId: string): Promise<Hasil> 
 
   return { ok: true };
 }
+
+export async function tandaiSedangDisewa(bookingId: string): Promise<Hasil> {
+  const user = await getCurrentUser();
+  if (!user || user.app_metadata?.role !== "admin") {
+    return { ok: false, error: "Hanya admin yang bisa melakukan aksi ini" };
+  }
+
+  const admin = createAdminClient();
+  const { data: b, error } = await admin
+    .from("booking")
+    .select("id, status, tanggal_mulai")
+    .eq("id", bookingId)
+    .single();
+
+  if (error || !b) return { ok: false, error: "Booking tidak ditemukan" };
+  if (b.status !== "terkonfirmasi") {
+    return { ok: false, error: "Booking ini belum terkonfirmasi atau sudah diambil" };
+  }
+
+  const hariIni = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
+  if (b.tanggal_mulai > hariIni) {
+    return { ok: false, error: `Alat baru bisa diambil mulai ${b.tanggal_mulai}` };
+  }
+
+  const { data: updated, error: errUpdate } = await admin
+    .from("booking")
+    .update({ status: "sedang_disewa", updated_at: new Date().toISOString() })
+    .eq("id", b.id)
+    .eq("status", "terkonfirmasi")
+    .select("id");
+
+  if (errUpdate) return { ok: false, error: "Gagal menyimpan perubahan" };
+  if (!updated || updated.length === 0) {
+    return { ok: false, error: "Status sudah berubah, muat ulang halaman" };
+  }
+
+  return { ok: true };
+}
