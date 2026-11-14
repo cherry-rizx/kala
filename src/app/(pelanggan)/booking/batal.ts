@@ -3,10 +3,9 @@
 import { createSessionClient, getCurrentUser } from "@/lib/supabase/session";
 import { createAdminClient } from "@/lib/supabase/server";
 import { hitungRefund } from "@/lib/booking/rules";
-import { refundMidtrans } from "@/lib/midtrans/refund";
 
 type HasilBatal =
-  | { ok: true; status: "dibatalkan" | "hangus"; refund: number }
+  | { ok: true; status: "dibatalkan" | "hangus" | "menunggu_refund"; refund: number }
   | { ok: false; error: string };
 
 export async function batalkanBooking(bookingId: string): Promise<HasilBatal> {
@@ -16,7 +15,7 @@ export async function batalkanBooking(bookingId: string): Promise<HasilBatal> {
   const supabase = await createSessionClient();
   const { data: booking, error } = await supabase
     .from("booking")
-    .select("id, status, tanggal_mulai, jumlah_booking, midtrans_order_id")
+    .select("id, status, tanggal_mulai, jumlah_booking")
     .eq("id", bookingId)
     .single();
 
@@ -35,34 +34,18 @@ export async function batalkanBooking(bookingId: string): Promise<HasilBatal> {
           booking.jumlah_booking
         );
 
-  const statusBaru = booking.status === "menunggu_bayar" || refund > 0 ? "dibatalkan" : "hangus";
-
-  if (booking.status === "terkonfirmasi" && refund > 0) {
-    const hasilRefund = await refundMidtrans({
-      orderId: booking.midtrans_order_id!,
-      refundKey: `refund-${booking.id}`,
-      amount: refund,
-      reason: "Pembatalan booking KALA",
-    });
-
-    if (!hasilRefund.ok) {
-      const pesanMidtrans =
-        hasilRefund.json?.status_message ?? hasilRefund.json?.error ?? "tidak ada pesan";
-      return {
-        ok: false,
-        error: `Refund gagal (HTTP ${hasilRefund.status}): ${pesanMidtrans}`,
-      };
-    }
-  }
+  let statusBaru: "dibatalkan" | "hangus" | "menunggu_refund";
+  if (booking.status === "menunggu_bayar") statusBaru = "dibatalkan";
+  else if (refund > 0) statusBaru = "menunggu_refund";
+  else statusBaru = "hangus";
 
   const admin = createAdminClient();
   const { data: updated, error: errUpdate } = await admin
     .from("booking")
     .update({
       status: statusBaru,
-      updated_at: new Date().toISOString(),
       refund_jumlah: refund,
-      refund_at: refund > 0 ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString(),
     })
     .eq("id", booking.id)
     .eq("status", booking.status)

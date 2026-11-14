@@ -13,6 +13,10 @@ type Booking = {
   created_at: string;
 };
 
+function tampilStatus(status: string) {
+  return status === "menunggu_refund" ? "dibatalkan" : status;
+}
+
 export default function RiwayatList({ bookings }: { bookings: Booking[] }) {
   const router = useRouter();
   const [loadingId, setLoadingId] = useState<string | null>(null);
@@ -27,11 +31,15 @@ export default function RiwayatList({ bookings }: { bookings: Booking[] }) {
         setPesan(hasil.error);
         return;
       }
-      setPesan(
-        hasil.status === "dibatalkan"
-          ? `Booking dibatalkan. Refund: Rp${hasil.refund.toLocaleString("id-ID")}.`
-          : "Booking hangus, tidak ada refund karena pembatalan H-7 atau kurang."
-      );
+      if (hasil.status === "menunggu_refund") {
+        setPesan(
+          `Pembatalan diterima. Refund Rp${hasil.refund.toLocaleString("id-ID")} menunggu konfirmasi admin.`
+        );
+      } else if (hasil.status === "dibatalkan") {
+        setPesan("Booking dibatalkan.");
+      } else {
+        setPesan("Booking hangus, tidak ada refund karena pembatalan H-7 atau kurang.");
+      }
       router.refresh();
     } catch {
       setPesan("Terjadi error saat membatalkan, coba lagi.");
@@ -51,7 +59,7 @@ export default function RiwayatList({ bookings }: { bookings: Booking[] }) {
         <div key={b.id} className="rounded border p-4">
           <p className="font-medium">{b.nama_pelanggan}</p>
           <p className="text-sm text-gray-600">
-            {b.tanggal_mulai} s/d {b.tanggal_selesai} · status: {b.status}
+            {b.tanggal_mulai} s/d {b.tanggal_selesai} · status: {tampilStatus(b.status)}
           </p>
           {b.status === "terkonfirmasi" && (
             <button

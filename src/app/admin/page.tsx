@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { createSessionClient, getCurrentUser } from "@/lib/supabase/session";
+import TombolRefund from "./tombol-refund";
 
 async function DaftarBooking() {
   await connection();
@@ -17,9 +18,7 @@ async function DaftarBooking() {
     .order("tanggal_mulai", { ascending: false });
 
   if (error) return <p className="text-red-600">Gagal memuat data: {error.message}</p>;
-  if (!data || data.length === 0) {
-    return <p className="mt-6 text-gray-600">Belum ada booking.</p>;
-  }
+  if (!data || data.length === 0) return <p className="mt-6 text-gray-600">Belum ada booking.</p>;
 
   return (
     <div className="mt-6 flex flex-col gap-3">
@@ -30,10 +29,9 @@ async function DaftarBooking() {
             {b.tanggal_mulai} s/d {b.tanggal_selesai} · status: {b.status}
           </p>
           {b.refund_jumlah ? (
-            <p className="text-sm text-gray-600">
-              Refund: Rp{b.refund_jumlah.toLocaleString("id-ID")}
-            </p>
+            <p className="text-sm text-gray-600">Refund: Rp{Number(b.refund_jumlah).toLocaleString("id-ID")}</p>
           ) : null}
+          {b.status === "menunggu_refund" && <TombolRefund bookingId={b.id} />}
         </div>
       ))}
     </div>
@@ -44,7 +42,7 @@ export default function AdminPage() {
   return (
     <main className="mx-auto max-w-2xl p-8">
       <h1 className="text-2xl font-bold">Dashboard Admin</h1>
-      <p className="mt-2 text-sm text-gray-600">Riwayat semua booking.</p>
+      <p className="mt-2 text-sm text-gray-600">Riwayat semua booking dan antrian refund.</p>
       <Suspense fallback={<p className="mt-6 text-gray-600">Memuat...</p>}>
         <DaftarBooking />
       </Suspense>
