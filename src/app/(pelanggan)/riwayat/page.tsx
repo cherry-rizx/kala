@@ -7,16 +7,16 @@ import { sinkronkanBookingMenunggu } from "@/lib/midtrans/status";
 
 async function DaftarRiwayat() {
   await connection();
-  await sinkronkanBookingMenunggu();
 
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  await sinkronkanBookingMenunggu();
 
   // RLS memastikan hanya booking milik user ini yang terambil
   const supabase = await createSessionClient();
   const { data, error } = await supabase
     .from("booking")
-    .select("id, nama_pelanggan, status, tanggal_mulai, tanggal_selesai, created_at")
+    .select("id, nama_pelanggan, status, tanggal_mulai, tanggal_selesai, refund_jumlah, created_at")
     .order("created_at", { ascending: false });
 
   if (error) return <p className="text-red-600">Gagal memuat riwayat: {error.message}</p>;

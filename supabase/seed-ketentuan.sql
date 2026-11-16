@@ -8,8 +8,8 @@ KETENTUAN SEWA ALAT PENDAKIAN KALA (versi 1.0)
 Pelanggan wajib membayar uang booking sebesar Rp20.000 melalui pembayaran online sebelum batas waktu yang ditentukan. Booking yang belum dibayar sampai batas waktu akan dibatalkan secara otomatis.
 
 2. Pembatalan dan refund
-a. Pembatalan dilakukan paling lambat 7 hari (H-7) sebelum tanggal sewa: uang booking dikembalikan 100%.
-b. Pembatalan dilakukan kurang dari H-7: uang booking tidak dikembalikan (hangus).
+a. Pembatalan dilakukan paling lambat 8 hari (H-8) sebelum tanggal sewa: uang booking dikembalikan 100%.
+b. Pembatalan dilakukan kurang dari H-8: uang booking tidak dikembalikan (hangus).
 
 3. Kehadiran
 Jika pelanggan tidak datang sesuai jadwal pengambilan alat, uang booking hangus.

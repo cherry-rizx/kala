@@ -27,16 +27,57 @@ export async function bayarBooking(bookingId: string): Promise<HasilBayar> {
 
   const orderId = `${booking.id}-${Date.now()}`;
 
-  const { redirectUrl } = await buatTransaksiSnap({
-    orderId,
-    jumlah: booking.jumlah_booking,
-    namaPelanggan: booking.nama_pelanggan,
-    email: user.email ?? "",
-  });
-
-  // Simpan order_id terbaru, dipakai untuk cek status ke Midtrans
   const admin = createAdminClient();
-  await admin.from("booking").update({ midtrans_order_id: orderId }).eq("id", booking.id);
+  const { data: pembayaranAktif } = await admin
+    .from("booking_pembayaran")
+    .select("status, redirect_url")
+    .eq("booking_id", booking.id)
+    .in("status", ["dibuat", "pending"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-  return { ok: true, redirectUrl };
+  if (pembayaranAktif) {
+    if (pembayaranAktif.redirect_url) return { ok: true, redirectUrl: pembayaranAktif.redirect_url };
+    return { ok: false, error: "Transaksi sedang dibuat. Tunggu sebentar lalu coba lagi." };
+  }
+
+  const { error: errAttempt } = await admin.rpc("buat_percobaan_pembayaran", {
+    p_booking_id: booking.id,
+    p_order_id: orderId,
+  });
+  if (errAttempt) {
+    const { data: existing } = await admin
+      .from("booking_pembayaran")
+      .select("redirect_url")
+      .eq("booking_id", booking.id)
+      .in("status", ["dibuat", "pending"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existing?.redirect_url) return { ok: true, redirectUrl: existing.redirect_url };
+    return { ok: false, error: "Batas pembayaran sudah lewat atau booking sudah berubah. Muat ulang halaman." };
+  }
+
+  try {
+    const { redirectUrl } = await buatTransaksiSnap({
+      orderId,
+      jumlah: booking.jumlah_booking,
+      namaPelanggan: booking.nama_pelanggan,
+      email: user.email ?? "",
+    });
+
+    await admin
+      .from("booking_pembayaran")
+      .update({ status: "pending", redirect_url: redirectUrl, updated_at: new Date().toISOString() })
+      .eq("order_id", orderId);
+
+    return { ok: true, redirectUrl };
+  } catch {
+    await admin
+      .from("booking_pembayaran")
+      .update({ status: "gagal_membuat", updated_at: new Date().toISOString() })
+      .eq("order_id", orderId);
+    return { ok: false, error: "Transaksi pembayaran gagal dibuat. Silakan coba lagi." };
+  }
 }

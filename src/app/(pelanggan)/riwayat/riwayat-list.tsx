@@ -10,11 +10,12 @@ type Booking = {
   status: string;
   tanggal_mulai: string;
   tanggal_selesai: string;
+  refund_jumlah: number | null;
   created_at: string;
 };
 
 function tampilStatus(status: string) {
-  return status === "menunggu_refund" ? "dibatalkan" : status;
+  return status === "menunggu_refund" ? "menunggu refund" : status;
 }
 
 export default function RiwayatList({ bookings }: { bookings: Booking[] }) {
@@ -22,7 +23,12 @@ export default function RiwayatList({ bookings }: { bookings: Booking[] }) {
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [pesan, setPesan] = useState<string | null>(null);
 
-  async function handleBatal(id: string) {
+  async function handleBatal(id: string, status: string) {
+    const konfirmasi = status === "menunggu_bayar"
+      ? "Batalkan booking yang belum dibayar?"
+      : "Ajukan pembatalan booking ini? Ketentuan refund H-8 tetap berlaku.";
+    if (!confirm(konfirmasi)) return;
+
     setLoadingId(id);
     setPesan(null);
     try {
@@ -38,7 +44,7 @@ export default function RiwayatList({ bookings }: { bookings: Booking[] }) {
       } else if (hasil.status === "dibatalkan") {
         setPesan("Booking dibatalkan.");
       } else {
-        setPesan("Booking hangus, tidak ada refund karena pembatalan H-7 atau kurang.");
+        setPesan("Booking hangus, tidak ada refund karena pembatalan kurang dari H-8.");
       }
       router.refresh();
     } catch {
@@ -61,10 +67,15 @@ export default function RiwayatList({ bookings }: { bookings: Booking[] }) {
           <p className="text-sm text-gray-600">
             {b.tanggal_mulai} s/d {b.tanggal_selesai} · status: {tampilStatus(b.status)}
           </p>
-          {b.status === "terkonfirmasi" && (
+          {Number(b.refund_jumlah) > 0 && (
+            <p className="text-sm text-gray-600">
+              {b.status === "menunggu_refund" ? "Refund yang menunggu diproses" : "Refund tercatat"}: Rp{Number(b.refund_jumlah).toLocaleString("id-ID")}
+            </p>
+          )}
+          {(b.status === "menunggu_bayar" || b.status === "terkonfirmasi") && (
             <button
               type="button"
-              onClick={() => handleBatal(b.id)}
+              onClick={() => handleBatal(b.id, b.status)}
               disabled={loadingId === b.id}
               className="mt-3 rounded border border-red-600 px-3 py-1 text-red-600 disabled:opacity-50"
             >

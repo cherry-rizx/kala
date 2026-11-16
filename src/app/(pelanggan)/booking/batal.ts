@@ -29,8 +29,8 @@ export async function batalkanBooking(bookingId: string): Promise<HasilBatal> {
     booking.status === "menunggu_bayar"
       ? 0
       : hitungRefund(
-          new Date(`${booking.tanggal_mulai}T00:00:00`),
-          new Date(),
+          new Date(`${booking.tanggal_mulai}T00:00:00Z`),
+          new Date(`${new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" })}T00:00:00Z`),
           booking.jumlah_booking
         );
 

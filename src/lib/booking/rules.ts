@@ -3,8 +3,8 @@ const MIN_HARI_REFUND = 8;
 
 export function hitungHariSelisih(tanggalSewa: Date, tanggalBatal: Date): number {
   const msPerHari = 24 * 60 * 60 * 1000;
-  const sewa = Date.UTC(tanggalSewa.getFullYear(), tanggalSewa.getMonth(), tanggalSewa.getDate());
-  const batal = Date.UTC(tanggalBatal.getFullYear(), tanggalBatal.getMonth(), tanggalBatal.getDate());
+  const sewa = Date.UTC(tanggalSewa.getUTCFullYear(), tanggalSewa.getUTCMonth(), tanggalSewa.getUTCDate());
+  const batal = Date.UTC(tanggalBatal.getUTCFullYear(), tanggalBatal.getUTCMonth(), tanggalBatal.getUTCDate());
   return Math.round((sewa - batal) / msPerHari);
 }
 

@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { buatBooking } from "./actions";
 import { bayarBooking } from "./pembayaran";
-import { batalkanBooking } from "./batal";
 type AlatItem = {
   id: string;
   nama: string;
@@ -27,6 +26,10 @@ export default function BookingForm({ alat }: { alat: AlatItem[] }) {
   const [pesan, setPesan] = useState<{ tipe: "error" | "sukses"; teks: string } | null>(null);
   const [bookingId, setBookingId] = useState<string | null>(null);
 
+  const lamaSewa = tanggalMulai && tanggalSelesai
+    ? Math.floor((Date.parse(`${tanggalSelesai}T00:00:00Z`) - Date.parse(`${tanggalMulai}T00:00:00Z`)) / 86400000) + 1
+    : 0;
+
   function ubahJumlah(alatId: string, nilai: number) {
     setJumlah((prev) => ({ ...prev, [alatId]: Math.max(0, nilai) }));
   }
@@ -34,6 +37,12 @@ export default function BookingForm({ alat }: { alat: AlatItem[] }) {
   const itemTerpilih = alat
     .filter((a) => (jumlah[a.id] ?? 0) > 0)
     .map((a) => ({ alatId: a.id, jumlah: jumlah[a.id] }));
+  const estimasiTotal = lamaSewa > 0
+    ? itemTerpilih.reduce((total, item) => {
+        const alatItem = alat.find((a) => a.id === item.alatId);
+        return total + (alatItem?.harga_sewa ?? 0) * item.jumlah * lamaSewa;
+      }, 0)
+    : 0;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -58,7 +67,7 @@ export default function BookingForm({ alat }: { alat: AlatItem[] }) {
     setBookingId(hasil.bookingId);
     setPesan({
       tipe: "sukses",
-      teks: `Booking berhasil dibuat. Kode booking: ${hasil.bookingId}. Silakan lakukan pembayaran Rp20.000.`,
+      teks: `Booking berhasil dibuat. Kode: ${hasil.bookingId}. Total sewa Rp${hasil.totalSewa.toLocaleString("id-ID")}; uang booking Rp20.000 dibayar online, sisanya di lokasi.`,
     });
   }
 
@@ -74,27 +83,6 @@ export default function BookingForm({ alat }: { alat: AlatItem[] }) {
     }
     window.location.href = hasil.redirectUrl;
   }
-
-  async function handleBatal() {
-  if (!bookingId) return;
-  setLoading(true);
-  const hasil = await batalkanBooking(bookingId);
-  setLoading(false);
-
-  if (!hasil.ok) {
-    setPesan({ tipe: "error", teks: hasil.error });
-    return;
-  }
-
-  setPesan({
-    tipe: "sukses",
-    teks:
-      hasil.status === "dibatalkan"
-        ? `Booking dibatalkan. Refund: Rp${hasil.refund.toLocaleString("id-ID")}.`
-        : "Booking hangus, tidak ada refund karena pembatalan kurang dari H-7.",
-  });
-  setBookingId(null);
-}
 
   return (
     <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-6">
@@ -158,6 +146,15 @@ export default function BookingForm({ alat }: { alat: AlatItem[] }) {
             />
           </div>
         ))}
+      </section>
+
+      <section className="rounded border bg-gray-50 p-4" aria-live="polite">
+        <p className="font-medium">
+          Estimasi total sewa{lamaSewa > 0 ? ` · ${lamaSewa} hari` : ""}: Rp{estimasiTotal.toLocaleString("id-ID")}
+        </p>
+        <p className="mt-1 text-sm text-gray-600">
+          Harga dihitung per hari kalender, termasuk tanggal mulai dan tanggal selesai. Uang booking Rp20.000 dibayar online; sisa sewa dibayar di lokasi.
+        </p>
       </section>
 
       <label className="flex items-start gap-2 text-sm">

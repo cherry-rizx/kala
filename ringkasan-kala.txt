@@ -1,0 +1,739 @@
+=====================================================================
+RINGKASAN PROJECT KALA
+Sistem penyewaan alat pendakian
+=====================================================================
+
+Dokumen ini merangkum seluruh proses pengerjaan project KALA dari
+awal sampai kondisi terakhir. Isinya: riwayat pengerjaan, arsitektur,
+alur bisnis, status fitur, task yang masih tersisa, dan bug yang
+sering muncul beserta cara mengatasinya.
+
+Catatan keamanan: dokumen ini sengaja TIDAK memuat password, secret
+key, server key, atau token. Simpan semua itu di tempat aman
+(password manager atau catatan pribadi), bukan di chat atau di file
+yang di-commit.
+
+
+---------------------------------------------------------------------
+1. GAMBARAN UMUM
+---------------------------------------------------------------------
+
+Nama project : KALA
+Fungsi        : Penyewaan alat pendakian (tenda, carrier, sleeping bag,
+                kompor) dengan booking online dan pembayaran di lokasi.
+Pemilik       : Tim dev kecil (Hanyz sebagai full stack, bagian UI/UX
+                dikerjakan tim lain).
+Lokasi kode   : ~/Desktop/kala (di laptop Liam, Ubuntu)
+Repository    : GitHub, akun cherry-rizx, repo kala (public)
+Target deploy : Vercel (belum dilakukan)
+
+Stack yang dipakai:
+- Next.js 16.4.5 dengan App Router, TypeScript, Tailwind CSS,
+  Turbopack, dan opsi cacheComponents aktif
+- Supabase: PostgreSQL, Auth (email dan password), Row Level Security
+- Midtrans Sandbox: pembayaran QRIS lewat Snap, status API, webhook
+- ngrok: tunnel untuk menerima webhook Midtrans di localhost
+  (domain tetap: antitoxic-nutmeg-ranting.ngrok-free.dev)
+- pg_cron di Supabase: job pembatalan booking yang lewat batas bayar
+
+Pembagian kerja yang disepakati:
+- Pembayaran online (booking Rp20.000) lewat Midtrans.
+- Sisa sewa dan denda dibayar di lokasi, dicatat admin secara manual.
+- Login dengan email. Username belum dipakai (hanya rencana).
+
+
+---------------------------------------------------------------------
+2. RIWAYAT PENGERJAAN (URUTAN KRONOLOGIS)
+---------------------------------------------------------------------
+
+TAHAP A: Persiapan lingkungan
+- Node.js v24 dan npm sudah terpasang. Git dan GitHub CLI (gh) juga.
+- Proyek dibuat dengan create-next-app (TypeScript, Tailwind, App
+  Router, ESLint, src directory, import alias @/*).
+- Library yang dipasang: @supabase/supabase-js, @supabase/ssr,
+  midtrans-client (dan @types/midtrans-client).
+- Struktur folder awal dibuat: src/app/(pelanggan), src/app/admin,
+  src/app/api/webhook/midtrans, src/lib/supabase, src/lib/midtrans,
+  src/lib/booking, src/types, src/components.
+- Repo dibuat dan di-push dengan perintah gh repo create.
+
+TAHAP B: Koneksi Supabase
+- Project Supabase bernama kala dibuat di region Singapore.
+- Supabase memakai format API key baru: publishable key dan secret
+  key. Nama variabel di .env.local disesuaikan.
+- Kesalahan awal: URL memakai /rest/v1/ di akhir. Harus hanya domain.
+- Koneksi diuji lewat route sementara, lalu route itu dihapus.
+
+TAHAP C: Skema database
+- supabase/schema.sql: tabel ketentuan, booking, persetujuan, beserta
+  RLS. Pernah dijalankan dua kali sehingga policy dobel (error
+  42710). Setelah itu hanya bagian yang kurang yang dijalankan.
+- supabase/alat.sql: tabel alat (master data dan stok) dan
+  booking_item (isi booking per alat).
+- supabase/migrasi-rentang-tanggal.sql: kolom tanggal_sewa diganti
+  menjadi tanggal_mulai dan tanggal_selesai (sewa bisa beberapa hari).
+- supabase/fungsi-ketersediaan.sql: fungsi cek_ketersediaan. Stok
+  dihitung dari stok_total dikurangi jumlah booking yang bertabrakan
+  dan statusnya menahan stok (menunggu_bayar, terkonfirmasi,
+  sedang_disewa, menunggu_denda). Booking menunggu_bayar yang telah
+  melewati batas_bayar tidak lagi menahan stok.
+- Seed ketentuan versi 1.0 dan seed alat (5 jenis, harga sementara).
+- Kolom tambahan kemudian: midtrans_order_id, refund_jumlah,
+  refund_at, denda_jumlah, denda_persen.
+- Constraint booking_status_check diperbarui untuk menambahkan status
+  menunggu_refund.
+- Migrasi fitur backlog disimpan di supabase/migrasi-backlog.sql dan
+  dijalankan setelah tabel alat, booking_item, dan rentang tanggal ada.
+
+TAHAP D: Teks ketentuan (versi 1.0)
+- Awalnya ringkasan untuk tes. Lalu diganti dengan teks lengkap lewat
+  perintah UPDATE (bukan INSERT), karena versi 1.0 sudah ada.
+- Aturan refund sempat dari H-7, lalu diubah menjadi H-8 (refund
+  penuh jika batal H-8 atau lebih awal, hangus jika kurang dari H-8).
+- Aturan penting: setelah ada pelanggan yang menyetujui, teks suatu
+  versi TIDAK BOLEH diedit lagi. Perubahan harus dibuat sebagai versi
+  baru (misalnya 1.1), karena persetujuan tersimpan dengan ketentuan_id.
+
+TAHAP E: Autentikasi
+- src/lib/supabase/client.ts: client untuk browser.
+- src/lib/supabase/server.ts: admin client (secret key) untuk server.
+- src/lib/supabase/session.ts: client berbasis cookie untuk membaca
+  user yang sedang login di server (getCurrentUser).
+- src/proxy.ts: di Next.js 16 nama middleware diganti menjadi proxy.
+  File ini menyegarkan session supaya cookie tetap valid.
+- Konfirmasi email dimatikan selama pengembangan.
+- Role admin disimpan di app_metadata (role = admin), diset lewat SQL
+  pada auth.users. Pelanggan tidak bisa mengubahnya sendiri.
+- Akun uji dibuat lewat Authentication → Users → Add user, karena
+  signup terus kena rate limit email.
+
+TAHAP F: Form booking
+- src/app/(pelanggan)/booking/page.tsx: server component yang
+  memanggil data alat dan membungkus form dengan Suspense.
+- src/app/(pelanggan)/booking/booking-form.tsx: client component
+  (nama pemesan, tanggal mulai dan selesai, jumlah per alat,
+  checkbox persetujuan).
+- src/app/(pelanggan)/booking/actions.ts: server action buatBooking.
+  Alurnya: cek login → validasi input → ambil ketentuan terbaru →
+  panggil RPC buat_booking_atomik untuk mengunci alat, memeriksa stok,
+  menghitung total, dan membuat booking, item, serta persetujuan dalam
+  satu transaksi. Harga berasal dari database.
+
+TAHAP G: Pembayaran Midtrans (Snap, QRIS)
+- src/lib/midtrans/config.ts: membaca env Midtrans.
+- src/lib/midtrans/snap.ts: membuat transaksi Snap. Ada cast tipe
+  karena typedef library tidak lengkap.
+- src/app/(pelanggan)/booking/pembayaran.ts: server action
+  bayarBooking. Setiap order dicatat di booking_pembayaran agar semua
+  percobaan pembayaran tetap dapat dicocokkan dengan booking.
+- Tombol "Bayar Rp20.000 sekarang" muncul setelah booking berhasil.
+- Order aktif dipakai ulang; percobaan baru ditolak selama order
+  sebelumnya masih pending agar pelanggan tidak membayar dua kali.
+
+TAHAP H: Webhook dan sinkronisasi status
+- src/app/api/webhook/midtrans/route.ts: menerima notifikasi Midtrans.
+  Signature dicek dulu dengan SHA512 (order_id + status_code +
+  gross_amount + server key). Signature tidak cocok dibalas 401.
+  - settlement / capture: menunggu_bayar → terkonfirmasi; jika booking
+    sudah dibatalkan atau batas bayarnya lewat, masuk menunggu_refund.
+  - refund / partial_refund: status menjadi dibatalkan dan nominal
+    kumulatif refund disimpan.
+  - expire / deny / cancel: status percobaan dicatat; booking tetap
+    bisa dicoba lagi selama batas bayarnya belum lewat.
+- src/lib/midtrans/status.ts: cekStatusMidtrans memanggil
+  GET /v2/{order_id}/status. Sinkronisasi memeriksa order pending,
+  termasuk pembayaran terlambat setelah booking dibatalkan.
+  Status expire, deny, cancel, refund, dan partial_refund direkonsiliasi.
+- Catatan penting: server key untuk notifikasi dan status harus dari
+  General Credentials. Server key yang dibuat dari "Generate Server
+  Key" dengan izin terbatas menghasilkan 401 atau 403.
+
+TAHAP I: Riwayat pelanggan
+- src/app/(pelanggan)/riwayat/page.tsx: server component, query
+  booking milik user (RLS membatasi datanya).
+- src/app/(pelanggan)/riwayat/riwayat-list.tsx: menampilkan booking.
+  Tombol "Batalkan booking" muncul untuk menunggu_bayar dan
+  terkonfirmasi. Riwayat menampilkan status refund dan nominalnya.
+- Link Riwayat sudah ada di navbar.
+
+TAHAP J: Pembatalan oleh pelanggan
+- src/app/(pelanggan)/booking/batal.ts: server action batalkanBooking.
+  Aturan:
+  - menunggu_bayar: langsung dibatalkan, refund 0.
+  - terkonfirmasi dan refund > 0 (batal H-8 atau lebih awal):
+    menunggu_refund, refund Rp20.000, menunggu konfirmasi admin.
+  - terkonfirmasi dan refund 0 (batal kurang dari H-8): hangus.
+- Refund dihitung dengan hitungRefund dari src/lib/booking/rules.ts.
+- Pelanggan TIDAK memanggil API refund. Refund dilakukan admin.
+
+TAHAP K: Job pembatalan batas bayar (pg_cron)
+- supabase/cron-batas-bayar.sql: fungsi batalkan_booking_kedaluwarsa
+  dan jadwal setiap menit. Booking menunggu_bayar yang lewat
+  batas_bayar berubah menjadi dibatalkan.
+- Fungsi dicabut aksesnya dari public, anon, dan authenticated, supaya
+  tidak bisa dipanggil lewat API.
+- Batas bayar saat ini 60 menit (angka sementara, belum disepakati).
+
+TAHAP L: Dashboard admin
+- src/app/admin/page.tsx: daftar semua booking (urut tanggal mulai
+  terbaru), dengan tombol sesuai status:
+  - terkonfirmasi → "Konfirmasi di lokasi" (tombol-lokasi.tsx)
+  - sedang_disewa → "Alat dikembalikan" + input persen kerusakan
+    (tombol-kembali.tsx)
+  - menunggu_denda → "Konfirmasi denda lunas"
+    (tombol-lunasi-denda.tsx)
+  - terkonfirmasi setelah tanggal mulai lewat → "Tandai no-show"
+    (tombol-no-show.tsx)
+  - menunggu_refund → "Konfirmasi refund" (tombol-refund.tsx)
+- src/app/admin/actions.ts berisi:
+  - konfirmasiRefundManual: cek ke Midtrans dulu. Kalau belum ada
+    status refund, aksi ditolak. Kalau sudah, status jadi dibatalkan.
+  - tandaiSedangDisewa: terkonfirmasi → sedang_disewa. Tidak bisa
+    sebelum tanggal mulai (zona WIB).
+  - kembalikanAlat: hitung denda = jumlah × harga_barang × persen /
+    100 dengan persentase yang diisi per item, lewat RPC atomik.
+    Kalau denda 0 → selesai. Kalau denda > 0 → menunggu_denda.
+  - konfirmasiPelunasanDenda: admin memastikan pembayaran di lokasi,
+    lalu mengubah menunggu_denda → selesai.
+  - tandaiNoShow: setelah tanggal mulai lewat, admin mengubah booking
+    terkonfirmasi yang tidak diambil menjadi hangus.
+- Semua aksi admin mengecek role admin di server.
+- Dashboard membaca semua booking dengan admin client hanya setelah
+  role admin diverifikasi.
+
+TAHAP M: Verifikasi lewat tes
+- Tes berhasil: booking, pembayaran QRIS simulator, sinkronisasi
+  status, riwayat, batal (menunggu_refund), konfirmasi lokasi,
+  pengembalian alat dengan denda.
+- Tes refund via API gagal dengan 403 dari Midtrans. Keputusan:
+  refund dilakukan manual di dashboard Midtrans, lalu admin
+  mengonfirmasi di aplikasi setelah status Midtrans = refund.
+
+
+---------------------------------------------------------------------
+3. ALUR BISNIS (SESUAI KETENTUAN)
+---------------------------------------------------------------------
+
+Alur utama:
+1. Pelanggan daftar atau login.
+2. Pelanggan membuat booking: pilih alat, tanggal ambil, tanggal
+   kembali, jumlah. Setujui ketentuan.
+   Status: menunggu_bayar.
+3. Pelanggan bayar Rp20.000 lewat QRIS (Midtrans).
+   Status: terkonfirmasi (lewat webhook atau sinkronisasi).
+4. Hari pengambilan: admin klik "Konfirmasi di lokasi" setelah
+   pelanggan datang dan bayar sisa sewa.
+   Status: sedang_disewa.
+5. Alat dikembalikan: admin input persen kerusakan (0 = utuh).
+   - Utuh: status selesai.
+   - Rusak atau hilang: status menunggu_denda, denda dicatat.
+6. Denda dilunasi di lokasi, lalu admin menekan tombol konfirmasi
+   pelunasan. Status berubah menjadi selesai.
+
+Total sewa = harga_sewa × jumlah × jumlah hari kalender (inklusif
+tanggal mulai dan tanggal selesai). Nilai total terlihat pada form
+pelanggan dan dashboard admin; uang booking Rp20.000 tetap dibayar
+online, sedangkan sisanya dibayar di lokasi.
+
+Alur pembatalan:
+- Batal sebelum bayar: dibatalkan (lewat cron batas bayar).
+- Batal setelah bayar, H-8 atau lebih awal: menunggu_refund, lalu
+  admin refund di dashboard Midtrans dan konfirmasi di aplikasi.
+  Status akhir: dibatalkan.
+- Batal setelah bayar, kurang dari H-8: hangus, tanpa refund.
+
+Ketentuan lain yang sudah disepakati:
+- Jaminan: KTP, SIM, atau kartu pelajar ditahan saat ambil alat.
+- Persetujuan dicatat dengan waktu, versi ketentuan, IP, dan user
+  agent.
+- Pelanggan yang tidak melunasi denda setelah peringatan dapat
+  ditangguhkan ke jalur hukum (sesuai kesepakatan saat booking).
+
+
+---------------------------------------------------------------------
+4. STATUS BOOKING
+---------------------------------------------------------------------
+
+menunggu_bayar   : booking dibuat, belum dibayar.
+terkonfirmasi    : pembayaran Rp20.000 sudah masuk.
+sedang_disewa    : alat sudah diambil pelanggan.
+menunggu_denda   : alat kembali dengan kerusakan atau hilang,
+                   denda belum lunas.
+menunggu_refund  : pelanggan batal H-8 atau lebih, menunggu
+                   refund dan konfirmasi admin.
+selesai          : alat kembali dan semua selesai.
+dibatalkan       : batal dan refund sudah dikonfirmasi (atau batal
+                   sebelum bayar).
+hangus           : batal kurang dari H-8 setelah bayar, tanpa refund.
+
+
+---------------------------------------------------------------------
+5. STRUKTUR FILE PENTING
+---------------------------------------------------------------------
+
+Konfigurasi:
+  next.config.ts            allowedDevOrigins (hostname ngrok saja)
+  src/proxy.ts              penyegaran session Supabase
+  .env.local                kunci (JANGAN di-commit)
+
+Supabase:
+  src/lib/supabase/client.ts    client browser
+  src/lib/supabase/server.ts    admin client (secret key)
+  src/lib/supabase/session.ts   createSessionClient, getCurrentUser
+  supabase/schema.sql           tabel dasar dan RLS
+  supabase/alat.sql             tabel alat dan booking_item
+  supabase/migrasi-rentang-tanggal.sql
+  supabase/fungsi-ketersediaan.sql
+  supabase/seed-ketentuan.sql
+  supabase/seed-alat.sql
+  supabase/migrasi-backlog.sql
+  supabase/cron-batas-bayar.sql
+
+Midtrans:
+  src/lib/midtrans/config.ts    env Midtrans
+  src/lib/midtrans/snap.ts      transaksi Snap
+  src/lib/midtrans/status.ts    cek status + sinkronisasi cadangan
+  src/lib/midtrans/refund.ts    tidak ada di repo
+
+Aturan bisnis:
+  src/lib/booking/rules.ts      hitungRefund, hitungDenda,
+                                MIN_HARI_REFUND = 8
+  src/lib/booking/status.ts     daftar status booking
+
+Halaman pelanggan:
+  src/app/(pelanggan)/login/page.tsx
+  src/app/(pelanggan)/booking/page.tsx
+  src/app/(pelanggan)/booking/booking-form.tsx
+  src/app/(pelanggan)/booking/actions.ts     buatBooking
+  src/app/(pelanggan)/booking/pembayaran.ts  bayarBooking
+  src/app/(pelanggan)/booking/batal.ts       batalkanBooking
+  src/app/(pelanggan)/riwayat/page.tsx
+  src/app/(pelanggan)/riwayat/riwayat-list.tsx
+
+Halaman admin:
+  src/app/admin/page.tsx
+  src/app/admin/actions.ts
+  src/app/admin/tombol-lokasi.tsx
+  src/app/admin/tombol-kembali.tsx
+  src/app/admin/tombol-refund.tsx
+  src/app/admin/tombol-lunasi-denda.tsx
+  src/app/admin/tombol-no-show.tsx
+
+Webhook:
+  src/app/api/webhook/midtrans/route.ts
+
+Navigasi:
+  src/components/navbar.tsx
+
+
+---------------------------------------------------------------------
+6. KEAMANAN YANG SUDAH DITERAPKAN
+---------------------------------------------------------------------
+
+- RLS aktif di semua tabel. Pelanggan hanya bisa melihat booking
+  miliknya sendiri.
+- Pelanggan tidak punya policy UPDATE atau DELETE. Perubahan status
+  hanya lewat server action atau webhook (secret key).
+- Harga dan jumlah selalu diambil dari database, bukan dari browser.
+- Signature webhook Midtrans dicek sebelum status diubah.
+- Semua aksi admin mengecek role di server.
+- Fungsi cron tidak bisa dipanggil lewat API publik.
+- Persetujuan hanya bisa ditulis dari server.
+
+
+---------------------------------------------------------------------
+7. KONDISI TERAKHIR
+---------------------------------------------------------------------
+
+Sudah berjalan dan sudah dites sebelum perubahan backlog lokal:
+- Login pelanggan dan admin.
+- Booking dengan cek stok per tanggal.
+- Pembayaran QRIS di Sandbox (sampai status settlement).
+- Sinkronisasi status ke database (webhook dan cadangan).
+- Riwayat pelanggan.
+- Pembatalan pelanggan dengan aturan H-8 (menunggu_refund).
+- Konfirmasi admin: di lokasi, pengembalian alat, perhitungan denda,
+  konfirmasi refund manual.
+- Job pembatalan batas bayar (pg_cron).
+
+Sudah diimplementasikan lokal dalam sesi ini, belum diterapkan ke
+Supabase atau diverifikasi terhadap layanan:
+- Pelunasan denda, no-show admin, total sewa, dan denda per item.
+- Booking atomik dengan row lock serta riwayat percobaan pembayaran.
+- Pembayaran terlambat, status expire/deny/cancel, dan refund sebagian.
+- Pembatalan booking menunggu_bayar dari halaman riwayat.
+- Migrasi SQL backlog dan definisi cron batas bayar.
+
+Belum berjalan:
+- Refund lewat API (masih 403, menunggu support Midtrans).
+- Pembayaran QRIS yang stabil (sempat "unavailable" dan "Failed to
+  Load QR").
+- Deploy ke production.
+
+
+---------------------------------------------------------------------
+8. TASK YANG MASIH TERSISA
+---------------------------------------------------------------------
+
+Prioritas tinggi (alur utama):
+  [x] Pelunasan denda: menunggu_denda → selesai (tombol admin).
+  [x] No-show: booking terkonfirmasi yang tanggal ambilnya lewat
+      tanpa diambil → hangus (manual atau cron).
+  [x] Total sewa: harga_sewa × jumlah × lama sewa. Ditampilkan di
+      form booking dan di halaman admin, karena sisa dibayar di lokasi.
+  [x] Denda per item dihitung dengan persentase tiap alat.
+
+Prioritas menengah:
+  [x] Stok anti dobel: cek stok dan insert digabung jadi satu fungsi
+      database dengan lock di baris alat.
+  [x] Pembayaran telat: pelanggan bayar setelah cron membatalkan
+      booking masuk antrean refund manual.
+  [x] Status Midtrans expire, deny, dan cancel dicatat per percobaan.
+  [x] Refund sebagian direkonsiliasi dari status dan nominal Midtrans.
+  [x] Tombol batal booking menunggu_bayar ditambahkan ke riwayat.
+      Pembatalan ini melepas stok sebelum batas waktu.
+  [x] Pesan "Refund gagal" lama tidak ada di UI pelanggan; nominal
+      refund kini ditampilkan dari status yang dicatat di database.
+
+Kebersihan dan keamanan:
+  [x] File src/lib/midtrans/refund.ts memang tidak ada di repo.
+  [ ] Hapus akun dan booking uji (tes@kala.test, blabla@tes.com,
+      admin@kala.test, dan booking uji lain).
+  [ ] Ganti password pengembangan sebelum deploy. Jangan pakai
+      admin123 untuk production.
+  [ ] Pastikan secret key Supabase yang pernah terlihat sudah
+      diganti dan key lama sudah dihapus.
+  [x] Simpan migrasi SQL backlog dan cron batas bayar di supabase/;
+      migrasi belum dijalankan ke database.
+  [ ] Pastikan commit terakhir sudah di-push.
+
+Deploy (setelah alur utama selesai):
+  [ ] Env di Vercel (semua variabel dari .env.local, dengan nilai
+      production).
+  [ ] Payment Notification URL di Midtrans diganti ke domain Vercel.
+  [ ] Redirect URL (Finish, Failed) diisi domain Vercel.
+  [ ] Aktivasi Midtrans production (business registration masih
+      berjalan).
+  [ ] IP Whitelist: IP Vercel tidak tetap, jadi perlu solusi (fixed IP
+      atau whitelist dinonaktifkan untuk production). Tanyakan ke
+      support.
+  [ ] Aktifkan kembali konfirmasi email di Supabase.
+  [ ] Pertimbangkan Supabase CLI supaya file supabase/ bisa
+      dikirim langsung ke project.
+
+Keputusan yang masih menunggu:
+  [ ] Batas bayar 60 menit (angka sementara).
+  [ ] Harga sewa per alat (angka sementara).
+  [x] Booking menunggu_bayar boleh dibatalkan pelanggan dari riwayat.
+  [ ] Apakah pelanggan boleh mengambil alat sebelum tanggal mulai.
+  [ ] Format username (saat ini login hanya email).
+
+Di luar cakupan developer (dikerjakan tim lain):
+  - UI/UX dan desain halaman.
+
+
+---------------------------------------------------------------------
+9. BUG YANG SERING TERJADI DAN CARA MENGATASINYA
+---------------------------------------------------------------------
+
+Catatan umum: sebagian besar bug berasal dari PASTE KODE YANG TIDAK
+UTUH (potongan blok yang tertempel di tempat salah). Cara paling
+aman: ganti seluruh isi file, jangan menambah potongan.
+
+A. BUG KODE (TYPESCRIPT DAN JSX)
+
+A1. "Expected '}', got '<eof>'" atau "Parsing ecmascript source code
+    failed"
+    Penyebab : kurung { atau ( belum tertutup, biasanya karena blok
+               tertempel dua kali atau potongan tidak lengkap.
+    Solusi   : ganti seluruh isi file dengan versi lengkap.
+
+A2. "Return statement is not allowed here"
+    Penyebab : return berada di luar fungsi, atau kode tertempel di
+               luar komponen.
+    Solusi   : pastikan return ada di dalam fungsi, lalu ganti seluruh
+               file.
+
+A3. "JSX expressions must have one parent element"
+    Penyebab : dua elemen sejajar tanpa pembungkus.
+    Solusi   : bungkus dengan <>...</> (fragment).
+
+A4. "the name `x` is defined multiple times"
+    Penyebab : useState atau variabel dideklarasikan dua kali setelah
+               potongan ditempel.
+    Solusi   : hapus salah satu, atau ganti seluruh file.
+
+A5. "Invalid hook call"
+    Penyebab : useState dipanggil di luar komponen.
+    Solusi   : pindahkan ke dalam fungsi komponen.
+
+A6. "Module not found: Can't resolve './actions'" (atau file lain)
+    Penyebab : file belum dibuat, nama salah, atau cache Turbopack
+               masih lama.
+    Solusi   : cek nama file dengan ls -la. Lalu rm -rf .next dan
+               npm run dev.
+
+A7. "Export X doesn't exist in target module"
+    Penyebab : file ada tapi isinya kosong atau export-nya belum ada.
+    Solusi   : isi ulang file.
+
+A8. "Cannot find name 'admin'" atau "Cannot find name 'updated'"
+    Penyebab : blok kode tertempel terpotong, variabel hilang.
+    Solusi   : ganti seluruh fungsi atau file.
+
+A9. "Type ... is not assignable" pada midtrans-client
+    Penyebab : typedef library tidak lengkap (clientKey wajib,
+               customer_details tidak ada di tipe).
+    Solusi   : tambahkan clientKey, lalu cast parameter ke tipe yang
+               diminta.
+
+B. BUG NEXT.JS
+
+B1. "Next.js encountered the unstable value Date.now() while
+    prerendering" (Blocking Route)
+    Penyebab : halaman dirender saat build, dan ada Date.now() atau
+               new Date() yang nilainya berubah.
+    Solusi   : pindahkan pemanggilan dinamis ke komponen anak yang
+               dibungkus Suspense, dengan await connection() di
+               baris pertamanya. Untuk tanggal di client component,
+               hitung di dalam useEffect.
+
+B2. "Route segment config 'dynamic' is not compatible with
+    cacheComponents"
+    Penyebab : export const dynamic tidak dipakai saat cacheComponents
+               aktif.
+    Solusi   : hapus export itu, pakai connection().
+
+B3. "Uncached data was accessed outside of <Suspense>"
+    Penyebab : data dibaca di luar Suspense.
+    Solusi   : bungkus komponen pengambil data dengan Suspense.
+
+B4. "Blocked cross-origin request" atau server action gagal dari
+    domain ngrok
+    Penyebab : domain dev asing belum diizinkan.
+    Solusi   : isi allowedDevOrigins di next.config.ts dengan hostname
+               saja, tanpa https:// dan tanpa garis miring.
+
+B5. Login selalu balik ke /login (loop)
+    Penyebab : session cookie tidak terbaca, sering karena membuka
+               aplikasi dari domain yang berbeda (localhost vs ngrok),
+               atau proxy.ts belum ada.
+    Solusi   : login dan buka aplikasi dari domain yang sama.
+               Pastikan proxy.ts ada di src/. Cek session dengan
+               getCurrentUser.
+
+B6. Port 3000 dipakai proses lama (next-server)
+    Penyebab : server dev lama masih hidup. Next pindah ke 3001,
+               tapi ngrok tetap mengarah ke 3000.
+    Solusi   : ss -ltnp | grep :3000 lalu kill -9 <PID>. Jalankan
+               npm run dev, dan pastikan muncul localhost:3000.
+
+B7. Warning "Next.js ignored package-lock.json ... outside the current
+    Git repository"
+    Penyebab : ada package-lock.json di folder atas.
+    Solusi   : tidak mengganggu. Bisa diabaikan.
+
+C. BUG SUPABASE (SQL EDITOR)
+
+C1. "policy ... already exists" (42710)
+    Penyebab : schema dijalankan dua kali.
+    Solusi   : jangan jalankan ulang schema. Jalankan hanya bagian
+               yang kurang.
+
+C2. "duplicate key" pada seed
+    Penyebab : data sudah masuk.
+    Solusi   : gunakan on conflict do nothing, atau cek count dulu.
+
+C3. "relation auth.user does not exist"
+    Penyebab : nama tabel salah. Yang benar auth.users.
+
+C4. "syntax error at or near console"
+    Penyebab : kode TypeScript tertempel di SQL Editor.
+    Solusi   : hapus baris itu. Log hanya di file .ts.
+
+C5. "update or delete on table booking violates foreign key
+    constraint persetujuan_booking_id_fkey"
+    Penyebab : tabel persetujuan menahan penghapusan booking (sengaja,
+               untuk menjaga bukti persetujuan).
+    Solusi   : untuk data uji saja, hapus persetujuan dulu, baru
+               booking. Untuk data nyata, JANGAN dihapus.
+
+C6. "null value in column pelanggan_id violates not-null constraint"
+    Penyebab : belum ada akun di auth.users saat insert booking uji.
+    Solusi   : buat akun dulu lewat dashboard.
+
+C7. "Failed to run sql query: 22P02 invalid input syntax for type
+    uuid"
+    Penyebab : placeholder seperti GANTI_USER_ID belum diganti.
+    Solusi   : ganti dengan nilai asli.
+
+C8. "email rate limit exceeded"
+    Penyebab : signup terlalu sering karena konfirmasi email aktif.
+    Solusi   : buat akun lewat Add user di dashboard, dan matikan
+               Confirm email untuk pengembangan.
+
+C9. Query di SQL Editor menampilkan "Success. No rows returned"
+    Penyebab : query berhasil, tapi tidak ada baris.
+    Solusi   : itu normal untuk insert, update, atau delete. Untuk
+               select, cek tabel hasilnya.
+
+C10. Hasil query tidak muncul
+     Solusi   : klik Show Results di bawah editor.
+
+C11. Snippet terbuka berisi query lama
+     Penyebab : snippet dipilih dari daftar tanpa diganti.
+     Solusi   : hapus isi editor dulu, lalu tempel query yang benar.
+
+C12. "schema cron does not exist"
+     Penyebab : extension pg_cron belum aktif.
+     Solusi   : aktifkan lewat Database → Extensions, lalu jalankan
+                ulang cron.schedule.
+
+D. BUG MIDTRANS
+
+D1. "IP address is blocked" saat login dashboard
+    Penyebab : IP whitelist aktif di akun, dan IP jaringan tidak
+               termasuk.
+    Solusi   : pindah ke jaringan yang sudah diizinkan, atau minta
+               support menambahkan IP. Jangan terus mencoba login,
+               karena bisa mengunci akun sementara.
+
+D2. curl status atau refund mengembalikan HTTP 403 "Access denied"
+    Penyebab yang mungkin:
+    - IP belum di-whitelist (kasus sebelumnya).
+    - Server key tidak punya izin (Core API None atau Read).
+    - Fitur refund API belum aktif untuk merchant.
+    Cara membedakan: curl status (GET) berhasil 200 dari IP yang sama,
+    lalu refund (POST) tetap 403 → kemungkinan besar fitur refund
+    belum diaktifkan. Ini perlu support Midtrans.
+
+D3. Signature tidak cocok (webhook 401)
+    Penyebab : server key di .env.local berbeda dengan server key yang
+               dipakai Midtrans menandatangani notifikasi.
+    Solusi   : pakai server key dari General Credentials, bukan server
+               key hasil Generate Server Key.
+
+D4. Halaman QRIS "This method is currently unavailable" atau "Failed to
+    Load QR"
+    Penyebab : metode belum aktif di Snap Checkout, atau masalah di
+               sisi Midtrans Sandbox.
+    Solusi   : cek Settings → Snap Checkout → Payment methods (Other
+               QRIS harus aktif). Kalau masih gagal, tunggu lalu
+               buat order baru. Jangan klik bayar berulang.
+
+D5. Simulator QRIS menampilkan 404
+    Penyebab : URL simulator salah.
+    Solusi   : pakai https://simulator.sandbox.midtrans.com, lalu
+               pilih QRIS dari menu kiri.
+
+D6. Order sudah dibayar di Midtrans tapi status di aplikasi masih
+    menunggu_bayar
+    Penyebab yang mungkin:
+    - Klik bayar lebih dari sekali, sehingga order_id di database
+      bukan yang dibayar.
+    - Webhook tidak sampai (ngrok mati atau Notification URL belum
+      disimpan).
+    - Sinkronisasi di riwayat belum dijalankan.
+    Cara cek: ambil midtrans_order_id dari database, lalu curl status
+    dengan nilai persis itu.
+
+D7. Status API mengembalikan HTTP 200 tapi status_code di JSON 404
+    Penyebab : Midtrans membalas 200 walaupun transaksi tidak ada.
+    Solusi   : sudah ditangani di status.ts (cek status_code di JSON).
+
+D8. Redirect URL ditolak "Invalid URL format"
+    Penyebab : Midtrans menolak localhost.
+    Solusi   : pakai URL publik (ngrok) untuk redirect. Atau pakai
+               placeholder untuk tes awal.
+
+D9. Refund dari dashboard menampilkan "technical error"
+    Penyebab : gangguan atau pembatasan di sisi Midtrans.
+    Solusi   : tunggu beberapa jam, lalu coba lagi. Jangan klik
+               berulang.
+
+D10. Refund dari API gagal tapi refund di dashboard sudah tercatat
+     Penyebab : refund dibuat manual, aplikasi belum tahu.
+     Solusi   : curl status ke Midtrans. Kalau transaction_status =
+                refund, admin klik "Konfirmasi refund" di dashboard
+                admin, atau samakan lewat SQL.
+
+E. BUG ALUR DAN DATA
+
+E1. Status database tidak sama dengan Midtrans
+    Penyebab : webhook tidak sampai saat refund atau pembayaran.
+    Solusi   : cek ngrok inspector (127.0.0.1:4040). Kalau tidak ada
+               request, cek Payment Notification URL. Untuk
+               sinkronisasi manual, samakan lewat SQL setelah
+               memastikan kondisi di Midtrans.
+
+E2. Booking dobel saat tes
+    Penyebab : data uji lama masih ada dan menahan stok.
+    Solusi   : hapus data uji (persetujuan dulu, lalu booking).
+
+E3. Stok terasa salah
+    Penyebab : booking dengan status menunggu_bayar atau
+               terkonfirmasi tetap menahan stok, walaupun seharusnya
+               sudah dibatalkan.
+    Solusi   : cek status booking. Booking yang sudah dibatalkan tidak
+               menahan stok.
+
+E4. Tanggal sewa dan ambil tidak sesuai
+    Penyebab : tanggal mulai adalah tanggal ambil, tanggal selesai
+               adalah tanggal kembali. Tanggal dihitung di zona WIB.
+    Solusi   : pastikan hari ini di zona Asia/Jakarta.
+
+E5. Refund menunjukkan "Refund gagal (HTTP 403)" padahal refund belum
+    dicoba
+    Penyebab : kode lama masih dipakai, atau cache.
+    Solusi   : pastikan batal.ts versi terbaru (tanpa refundMidtrans).
+
+E6. Data admin tidak tampil
+    Penyebab : role admin belum tersimpan di app_metadata, atau sesi
+               lama masih aktif.
+    Solusi   : cek raw_app_meta_data di auth.users. Logout lalu login
+               ulang.
+
+E7. Tombol konfirmasi refund tidak bisa dipakai
+    Penyebab : status booking bukan menunggu_refund, atau Midtrans
+               belum mencatat refund.
+    Solusi   : cek status booking dan transaction_status di Midtrans.
+
+
+---------------------------------------------------------------------
+10. PERINTAH CEPAT YANG SERING DIPAKAI
+---------------------------------------------------------------------
+
+Cek tipe:            npx tsc --noEmit
+Cari log sementara:  grep -rn "console.log" src
+Cek git:             git status
+Port yang dipakai:   ss -ltnp | grep ':3000'
+Bersihkan cache:     rm -rf .next
+Jalankan dev:        npm run dev
+Jalankan tunnel:     ngrok http --url=antitoxic-nutmeg-ranting.ngrok-free.dev 3000
+Inspector ngrok:     http://127.0.0.1:4040
+Cek IP publik:       curl -s https://api.ipify.org; echo
+Cek status Midtrans: curl -s -u "$(grep '^MIDTRANS_SERVER_KEY=' .env.local | cut -d= -f2):" \
+                     "https://api.sandbox.midtrans.com/v2/ORDER_ID/status"
+
+
+---------------------------------------------------------------------
+11. CATATAN PENTING UNTUK KELANJUTAN
+---------------------------------------------------------------------
+
+- Selalu ganti seluruh isi file saat ada perubahan besar. Jangan
+  menempel potongan ke tengah file.
+- Setiap perubahan database harus dicatat di supabase/ dan dijalankan
+  di SQL Editor. File di Git bukan yang otomatis dijalankan.
+- Jangan mengedit teks ketentuan yang sudah disetujui pelanggan.
+  Buat versi baru.
+- Jangan klik tombol bayar atau refund berulang saat tes. Setiap
+  klik bisa membuat transaksi atau refund baru.
+- Sebelum deploy, semua akun uji dan password pengembangan harus
+  dibersihkan.
+- Refund API belum bisa dipakai sampai support Midtrans mengaktifkan
+  fitur itu. Sampai saat itu, alur refund memakai konfirmasi manual
+  admin setelah refund dibuat di dashboard Midtrans.
+
+=====================================================================
+AKHIR DOKUMEN
+=====================================================================

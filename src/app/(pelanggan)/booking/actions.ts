@@ -18,27 +18,49 @@ type InputBooking = {
 };
 
 type HasilBooking =
-  | { ok: true; bookingId: string }
+  | { ok: true; bookingId: string; totalSewa: number }
   | { ok: false; error: string };
 
 function hariIniWIB(): string {
   return new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
 }
 
+function tanggalValid(nilai: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(nilai)) return false;
+  const tanggal = new Date(`${nilai}T00:00:00Z`);
+  return Number.isFinite(tanggal.getTime()) && tanggal.toISOString().slice(0, 10) === nilai;
+}
+
 export async function buatBooking(input: InputBooking): Promise<HasilBooking> {
+  if (!input || typeof input !== "object") {
+    return { ok: false, error: "Data booking tidak valid" };
+  }
   // 1. Wajib login
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "Silakan login terlebih dahulu" };
 
   // 2. Validasi input dasar
-  if (!input.setujuKetentuan) {
+  if (input.setujuKetentuan !== true) {
     return { ok: false, error: "Anda harus menyetujui ketentuan" };
   }
-  if (!input.namaPelanggan.trim()) {
+  if (typeof input.namaPelanggan !== "string" || !input.namaPelanggan.trim()) {
     return { ok: false, error: "Nama pelanggan wajib diisi" };
   }
-  if (input.items.length === 0) {
+  if (input.namaPelanggan.trim().length > 120) {
+    return { ok: false, error: "Nama pelanggan terlalu panjang" };
+  }
+  if (!Array.isArray(input.items) || input.items.length === 0) {
     return { ok: false, error: "Pilih minimal satu alat" };
+  }
+  if (input.items.some((i) => !i || typeof i.alatId !== "string" || !i.alatId)) {
+    return { ok: false, error: "Pilihan alat tidak valid" };
+  }
+  if (new Set(input.items.map((i) => i.alatId)).size !== input.items.length) {
+    return { ok: false, error: "Ada alat yang dipilih lebih dari sekali" };
+  }
+  if (typeof input.tanggalMulai !== "string" || typeof input.tanggalSelesai !== "string"
+      || !tanggalValid(input.tanggalMulai) || !tanggalValid(input.tanggalSelesai)) {
+    return { ok: false, error: "Tanggal sewa tidak valid" };
   }
   if (input.tanggalMulai < hariIniWIB()) {
     return { ok: false, error: "Tanggal sewa tidak boleh di masa lalu" };
@@ -63,84 +85,38 @@ export async function buatBooking(input: InputBooking): Promise<HasilBooking> {
     return { ok: false, error: "Ketentuan belum tersedia" };
   }
 
-  // 4. Ambil data alat dari database, jangan percaya harga dari browser
-  const alatIds = input.items.map((i) => i.alatId);
-  const { data: alatList, error: errAlat } = await admin
-    .from("alat")
-    .select("id, harga_sewa, aktif")
-    .in("id", alatIds);
-  if (errAlat || !alatList || alatList.length !== alatIds.length) {
-    return { ok: false, error: "Ada alat yang tidak ditemukan" };
-  }
-  if (alatList.some((a) => !a.aktif)) {
-    return { ok: false, error: "Ada alat yang sedang tidak tersedia" };
-  }
-
-  // 5. Cek ketersediaan setiap alat
-  for (const item of input.items) {
-    const { data: tersedia, error } = await admin.rpc("cek_ketersediaan", {
-      p_alat_id: item.alatId,
-      p_mulai: input.tanggalMulai,
-      p_selesai: input.tanggalSelesai,
-      p_jumlah: item.jumlah,
-    });
-    if (error || !tersedia) {
-      return { ok: false, error: "Stok alat tidak cukup pada tanggal tersebut" };
-    }
-  }
-
-  // 6. Simpan booking
+  // Harga, stok, booking, item, dan bukti persetujuan ditangani satu
+  // transaksi database dengan row lock agar dua pemesan tidak lolos bersama.
   const batasBayar = new Date(Date.now() + BATAS_BAYAR_MENIT * 60 * 1000);
-
-  const { data: booking, error: errBooking } = await admin
-    .from("booking")
-    .insert({
-      pelanggan_id: user.id,
-      nama_pelanggan: input.namaPelanggan.trim(),
-      tanggal_mulai: input.tanggalMulai,
-      tanggal_selesai: input.tanggalSelesai,
-      jumlah_booking: BIAYA_BOOKING,
-      status: "menunggu_bayar",
-      batas_bayar: batasBayar.toISOString(),
-    })
-    .select("id")
-    .single();
-  if (errBooking || !booking) {
-    return { ok: false, error: "Gagal menyimpan booking" };
-  }
-
-  // 7. Simpan item booking dengan harga saat ini
-  const hargaPerAlat = new Map(alatList.map((a) => [a.id, a.harga_sewa]));
-  const { error: errItem } = await admin.from("booking_item").insert(
-    input.items.map((item) => ({
-      booking_id: booking.id,
-      alat_id: item.alatId,
-      jumlah: item.jumlah,
-      harga_satuan: hargaPerAlat.get(item.alatId)!,
-    }))
-  );
-  if (errItem) {
-    // Rollback: hapus booking yang sudah terlanjur dibuat
-    await admin.from("booking").delete().eq("id", booking.id);
-    return { ok: false, error: "Gagal menyimpan detail alat" };
-  }
-
-  // 8. Simpan bukti persetujuan
   const headerList = await headers();
   const ip = headerList.get("x-forwarded-for")?.split(",")[0].trim() ?? null;
   const userAgent = headerList.get("user-agent");
-
-  const { error: errPersetujuan } = await admin.from("persetujuan").insert({
-    pelanggan_id: user.id,
-    booking_id: booking.id,
-    ketentuan_id: ketentuan.id,
-    ip_address: ip,
-    user_agent: userAgent,
+  const { data, error } = await admin.rpc("buat_booking_atomik", {
+    p_pelanggan_id: user.id,
+    p_nama_pelanggan: input.namaPelanggan.trim(),
+    p_tanggal_mulai: input.tanggalMulai,
+    p_tanggal_selesai: input.tanggalSelesai,
+    p_jumlah_booking: BIAYA_BOOKING,
+    p_batas_bayar: batasBayar.toISOString(),
+    p_ketentuan_id: ketentuan.id,
+    p_ip_address: ip,
+    p_user_agent: userAgent,
+    p_items: input.items.map((item) => ({ alat_id: item.alatId, jumlah: item.jumlah })),
   });
-  if (errPersetujuan) {
-    await admin.from("booking").delete().eq("id", booking.id);
-    return { ok: false, error: "Gagal menyimpan persetujuan" };
+  if (error || !data) {
+    const pesan = error?.message ?? "";
+    if (pesan.includes("STOK_TIDAK_CUKUP")) {
+      return { ok: false, error: "Stok alat tidak cukup pada tanggal tersebut" };
+    }
+    if (pesan.includes("ALAT_TIDAK_TERSEDIA")) {
+      return { ok: false, error: "Ada alat yang sedang tidak tersedia" };
+    }
+    if (pesan.includes("ITEM_DUPLIKAT")) {
+      return { ok: false, error: "Ada alat yang dipilih lebih dari sekali" };
+    }
+    return { ok: false, error: "Gagal menyimpan booking. Coba lagi." };
   }
 
-  return { ok: true, bookingId: booking.id };
+  const hasil = data as { booking_id: string; total_sewa: number };
+  return { ok: true, bookingId: hasil.booking_id, totalSewa: hasil.total_sewa };
 }

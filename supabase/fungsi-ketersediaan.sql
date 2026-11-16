@@ -18,6 +18,7 @@ as $$
           join public.booking b on b.id = bi.booking_id
           where bi.alat_id = p_alat_id
             and b.status in ('menunggu_bayar', 'terkonfirmasi', 'sedang_disewa', 'menunggu_denda')
+            and (b.status <> 'menunggu_bayar' or b.batas_bayar > now())
             and b.tanggal_mulai <= p_selesai
             and b.tanggal_selesai >= p_mulai
         ),
