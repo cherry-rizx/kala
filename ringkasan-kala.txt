@@ -405,7 +405,7 @@ Kebersihan dan keamanan:
       diganti dan key lama sudah dihapus.
   [x] Simpan migrasi SQL backlog dan cron batas bayar di supabase/;
       migrasi belum dijalankan ke database.
-  [ ] Pastikan commit terakhir sudah di-push.
+  [x] Perubahan backlog sudah di-push ke origin/main.
 
 Deploy (setelah alur utama selesai):
   [ ] Env di Vercel (semua variabel dari .env.local, dengan nilai
