@@ -3,11 +3,21 @@
 
 alter table public.booking
   add column if not exists total_sewa integer not null default 0,
+  add column if not exists jenis_paket text not null default 'alat_satuan',
+  add column if not exists jumlah_peserta integer not null default 1,
   add column if not exists midtrans_order_id text,
   add column if not exists refund_jumlah integer not null default 0,
   add column if not exists refund_at timestamptz,
   add column if not exists denda_jumlah integer not null default 0,
   add column if not exists denda_persen integer;
+
+alter table public.booking drop constraint if exists booking_jenis_paket_check;
+alter table public.booking
+  add constraint booking_jenis_paket_check
+  check (jenis_paket in ('alat_satuan', 'tektok', 'rombongan'));
+alter table public.booking drop constraint if exists booking_jumlah_peserta_check;
+alter table public.booking
+  add constraint booking_jumlah_peserta_check check (jumlah_peserta >= 1);
 
 alter table public.booking_item
   add column if not exists harga_barang_satuan integer,
@@ -64,11 +74,15 @@ set total_sewa = coalesce((
   where bi.booking_id = b.id
 ), 0) * (b.tanggal_selesai - b.tanggal_mulai + 1);
 
+drop function if exists public.buat_booking_atomik(uuid, text, date, date, integer, timestamptz, uuid, text, text, jsonb);
+
 create or replace function public.buat_booking_atomik(
   p_pelanggan_id uuid,
   p_nama_pelanggan text,
   p_tanggal_mulai date,
   p_tanggal_selesai date,
+  p_jenis_paket text,
+  p_jumlah_peserta integer,
   p_jumlah_booking integer,
   p_batas_bayar timestamptz,
   p_ketentuan_id uuid,
@@ -94,6 +108,13 @@ begin
   if p_tanggal_mulai is null or p_tanggal_selesai is null
      or p_tanggal_selesai < p_tanggal_mulai then
     raise exception 'TANGGAL_TIDAK_VALID';
+  end if;
+  if p_jenis_paket is null or p_jenis_paket not in ('alat_satuan', 'tektok', 'rombongan')
+     or p_jumlah_peserta is null or p_jumlah_peserta < 1 then
+    raise exception 'PAKET_TIDAK_VALID';
+  end if;
+  if p_jenis_paket = 'rombongan' and p_jumlah_peserta < 11 then
+    raise exception 'MINIMAL_11_PESERTA';
   end if;
   if p_items is null or jsonb_typeof(p_items) <> 'array' then
     raise exception 'ITEM_TIDAK_VALID';
@@ -160,10 +181,10 @@ begin
 
   insert into public.booking (
     pelanggan_id, nama_pelanggan, tanggal_mulai, tanggal_selesai,
-    jumlah_booking, total_sewa, status, batas_bayar
+    jenis_paket, jumlah_peserta, jumlah_booking, total_sewa, status, batas_bayar
   ) values (
     p_pelanggan_id, trim(p_nama_pelanggan), p_tanggal_mulai, p_tanggal_selesai,
-    p_jumlah_booking, v_total_sewa, 'menunggu_bayar', p_batas_bayar
+    p_jenis_paket, p_jumlah_peserta, p_jumlah_booking, v_total_sewa, 'menunggu_bayar', p_batas_bayar
   ) returning id into v_booking_id;
 
   insert into public.booking_item (
@@ -318,8 +339,8 @@ begin
 end;
 $$;
 
-revoke all on function public.buat_booking_atomik(uuid, text, date, date, integer, timestamptz, uuid, text, text, jsonb) from public, anon, authenticated;
-grant execute on function public.buat_booking_atomik(uuid, text, date, date, integer, timestamptz, uuid, text, text, jsonb) to service_role;
+revoke all on function public.buat_booking_atomik(uuid, text, date, date, text, integer, integer, timestamptz, uuid, text, text, jsonb) from public, anon, authenticated;
+grant execute on function public.buat_booking_atomik(uuid, text, date, date, text, integer, integer, timestamptz, uuid, text, text, jsonb) to service_role;
 revoke all on function public.buat_percobaan_pembayaran(uuid, text) from public, anon, authenticated;
 grant execute on function public.buat_percobaan_pembayaran(uuid, text) to service_role;
 revoke all on function public.catat_pengembalian_atomik(uuid, jsonb) from public, anon, authenticated;

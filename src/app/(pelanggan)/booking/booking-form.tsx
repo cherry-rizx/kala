@@ -1,25 +1,108 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { buatBooking } from "./actions";
 import { bayarBooking } from "./pembayaran";
+
 type AlatItem = {
   id: string;
   nama: string;
   harga_sewa: number;
   stok_total: number;
+  jenis_barang: "satuan" | "paket";
+  tipe_paket: "tektok" | "rombongan" | null;
+  minimal_peserta: number;
+  deskripsi: string | null;
 };
 
-export default function BookingForm({ alat }: { alat: AlatItem[] }) {
-  const [hariIni, setHariIni] = useState("");
+type JenisPaket = "alat_satuan" | "tektok" | "rombongan";
 
-  useEffect(() => {
-    setHariIni(new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }));
-  }, []);
+function rupiah(nilai: number) {
+  return `Rp${nilai.toLocaleString("id-ID")}`;
+}
 
-  const [namaPelanggan, setNamaPelanggan] = useState("");
+function ikonAlat(nama: string) {
+  const value = nama.toLowerCase();
+  if (value.includes("tenda")) return "⛺";
+  if (value.includes("carrier") || value.includes("tas")) return "🎒";
+  if (value.includes("sleeping") || value.includes("matras")) return "🛏️";
+  if (value.includes("kompor") || value.includes("masak")) return "🍳";
+  return "🧭";
+}
+
+function KartuProduk({
+  item,
+  jumlah,
+  onUbah,
+}: {
+  item: AlatItem;
+  jumlah: number;
+  onUbah: (jumlah: number) => void;
+}) {
+  const paket = item.jenis_barang === "paket";
+  const ikon = paket ? (item.tipe_paket === "rombongan" ? "🏕️" : "🥾") : ikonAlat(item.nama);
+  return (
+    <article className={`group overflow-hidden rounded-2xl border bg-white transition hover:-translate-y-1 hover:shadow-lg ${jumlah > 0 ? "border-emerald-800 ring-1 ring-emerald-800" : "border-stone-200"}`}>
+      <div className="relative flex h-36 items-center justify-center overflow-hidden bg-gradient-to-br from-emerald-50 via-stone-100 to-amber-50">
+        <span className="absolute -right-5 -top-8 size-32 rounded-full bg-white/60 blur-2xl" aria-hidden="true" />
+        <span className="relative flex size-20 items-center justify-center rounded-3xl border border-white/80 bg-white/80 text-5xl shadow-sm transition group-hover:scale-105" aria-hidden="true">{ikon}</span>
+        {jumlah > 0 && <span className="absolute right-3 top-3 rounded-full bg-emerald-900 px-2.5 py-1 text-[10px] font-bold tracking-wide text-white">DIPILIH</span>}
+      </div>
+      <div className="p-4">
+        <div className="flex min-h-12 items-start justify-between gap-3">
+          <h3 className="font-bold leading-5 text-stone-900">{item.nama}</h3>
+          <span className="shrink-0 rounded-full bg-stone-100 px-2 py-1 text-[10px] font-semibold text-stone-500">{item.stok_total} tersedia</span>
+        </div>
+        <p className="mt-1 text-xs text-stone-500">
+          {paket
+            ? item.deskripsi || (item.tipe_paket === "rombongan" ? `Isi paket menyusul · minimal ${item.minimal_peserta} pendaki` : "Isi paket tektok menyusul")
+            : item.deskripsi || "Perlengkapan satuan"}
+        </p>
+        <div className="mt-4 flex items-center justify-between gap-2 border-t border-stone-100 pt-3">
+          <div>
+            {paket ? (
+              <>
+                <p className="text-sm font-bold text-emerald-950">Tarif di toko</p>
+                <p className="text-[11px] text-stone-500">Isi dan harga paket menyusul</p>
+              </>
+            ) : (
+              <>
+                <p className="text-lg font-extrabold tracking-tight text-emerald-950">{rupiah(item.harga_sewa)}</p>
+                <p className="text-[11px] text-stone-500">per unit / hari</p>
+              </>
+            )}
+          </div>
+          {paket ? (
+            <button type="button" onClick={() => onUbah(jumlah > 0 ? 0 : 1)} disabled={item.stok_total < 1} className={`rounded-xl px-4 py-2.5 text-sm font-bold transition disabled:opacity-40 ${jumlah > 0 ? "border border-stone-300 text-stone-700" : "bg-emerald-950 text-white hover:bg-emerald-800"}`}>
+              {jumlah > 0 ? "Hapus paket" : "Pilih paket"}
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 rounded-xl border border-stone-200 p-1">
+              <button type="button" aria-label={`Kurangi ${item.nama}`} onClick={() => onUbah(jumlah - 1)} disabled={jumlah <= 0} className="flex size-8 items-center justify-center rounded-lg text-lg font-semibold text-stone-600 transition hover:bg-stone-100 disabled:opacity-30">−</button>
+              <span className="min-w-5 text-center text-sm font-bold tabular-nums">{jumlah}</span>
+              <button type="button" aria-label={`Tambah ${item.nama}`} onClick={() => onUbah(jumlah + 1)} disabled={jumlah >= item.stok_total} className="flex size-8 items-center justify-center rounded-lg bg-emerald-950 text-lg font-semibold text-white transition hover:bg-emerald-800 disabled:opacity-30">+</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+export default function BookingForm({
+  alat,
+  paketKatalogAktif,
+  hariIni,
+}: {
+  alat: AlatItem[];
+  paketKatalogAktif: boolean;
+  hariIni: string;
+}) {
+  const [jumlahPeserta, setJumlahPeserta] = useState("1");
+  const [cari, setCari] = useState("");
   const [tanggalMulai, setTanggalMulai] = useState("");
   const [tanggalSelesai, setTanggalSelesai] = useState("");
+  const [namaPelanggan, setNamaPelanggan] = useState("");
   const [jumlah, setJumlah] = useState<Record<string, number>>({});
   const [setujuKetentuan, setSetujuKetentuan] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -29,171 +112,326 @@ export default function BookingForm({ alat }: { alat: AlatItem[] }) {
   const lamaSewa = tanggalMulai && tanggalSelesai
     ? Math.floor((Date.parse(`${tanggalSelesai}T00:00:00Z`) - Date.parse(`${tanggalMulai}T00:00:00Z`)) / 86400000) + 1
     : 0;
+  const peserta = Number(jumlahPeserta);
+  const paketTerpilih = alat.find((item) => item.jenis_barang === "paket" && (jumlah[item.id] ?? 0) > 0);
+  const jenisPaket: JenisPaket = paketTerpilih?.tipe_paket ?? "alat_satuan";
+  const paketRombonganBelumCukup = jenisPaket === "rombongan" && peserta < Math.max(11, paketTerpilih?.minimal_peserta ?? 11);
 
-  function ubahJumlah(alatId: string, nilai: number) {
-    setJumlah((prev) => ({ ...prev, [alatId]: Math.max(0, nilai) }));
-  }
+  const alatTerfilter = useMemo(() => {
+    const query = cari.trim().toLowerCase();
+    return alat.filter((item) => item.nama.toLowerCase().includes(query));
+  }, [alat, cari]);
 
   const itemTerpilih = alat
-    .filter((a) => (jumlah[a.id] ?? 0) > 0)
-    .map((a) => ({ alatId: a.id, jumlah: jumlah[a.id] }));
+    .filter((item) => (jumlah[item.id] ?? 0) > 0)
+    .map((item) => ({ alatId: item.id, jumlah: jumlah[item.id] }));
+
   const estimasiTotal = lamaSewa > 0
-    ? itemTerpilih.reduce((total, item) => {
-        const alatItem = alat.find((a) => a.id === item.alatId);
-        return total + (alatItem?.harga_sewa ?? 0) * item.jumlah * lamaSewa;
+    ? itemTerpilih.reduce((total, pilihan) => {
+        const barang = alat.find((item) => item.id === pilihan.alatId);
+        return total + (barang?.harga_sewa ?? 0) * pilihan.jumlah * lamaSewa;
       }, 0)
     : 0;
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  function ubahJumlah(alatId: string, nilai: number) {
+    const produk = alat.find((item) => item.id === alatId);
+    if (!produk) return;
+    setJumlah((sebelumnya) => ({
+      ...(produk.jenis_barang === "paket"
+        ? Object.fromEntries(alat.filter((item) => item.jenis_barang === "paket").map((item) => [item.id, 0]))
+        : sebelumnya),
+      [alatId]: produk.jenis_barang === "paket" ? Math.min(1, Math.max(0, nilai)) : Math.min(produk.stok_total, Math.max(0, nilai)),
+    }));
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setPesan(null);
     setLoading(true);
 
-    const hasil = await buatBooking({
-      namaPelanggan,
-      tanggalMulai,
-      tanggalSelesai,
-      items: itemTerpilih,
-      setujuKetentuan,
-    });
+    try {
+      const hasil = await buatBooking({
+        namaPelanggan,
+        tanggalMulai,
+        tanggalSelesai,
+        jenisPaket,
+        jumlahPeserta: paketTerpilih ? peserta : 1,
+        items: itemTerpilih,
+        setujuKetentuan,
+      });
 
-    setLoading(false);
+      if (!hasil.ok) {
+        setPesan({ tipe: "error", teks: hasil.error });
+        return;
+      }
 
-    if (!hasil.ok) {
-      setPesan({ tipe: "error", teks: hasil.error });
-      return;
+      setBookingId(hasil.bookingId);
+      setPesan({
+        tipe: "sukses",
+        teks: `Booking berhasil dibuat. Uang booking Rp20.000 dibayar online; seluruh pelunasan sewa dilakukan di toko.`,
+      });
+    } catch {
+      setPesan({ tipe: "error", teks: "Booking belum berhasil dibuat. Silakan coba lagi." });
+    } finally {
+      setLoading(false);
     }
-
-    setBookingId(hasil.bookingId);
-    setPesan({
-      tipe: "sukses",
-      teks: `Booking berhasil dibuat. Kode: ${hasil.bookingId}. Total sewa Rp${hasil.totalSewa.toLocaleString("id-ID")}; uang booking Rp20.000 dibayar online, sisanya di lokasi.`,
-    });
   }
 
   async function handleBayar() {
     if (!bookingId) return;
     setLoading(true);
-    const hasil = await bayarBooking(bookingId);
-    setLoading(false);
-
-    if (!hasil.ok) {
-      setPesan({ tipe: "error", teks: hasil.error });
-      return;
+    setPesan(null);
+    try {
+      const hasil = await bayarBooking(bookingId);
+      if (!hasil.ok) {
+        setPesan({ tipe: "error", teks: hasil.error });
+        return;
+      }
+      window.location.href = hasil.redirectUrl;
+    } catch {
+      setPesan({ tipe: "error", teks: "Pembayaran belum dapat dibuka. Silakan coba lagi." });
+    } finally {
+      setLoading(false);
     }
-    window.location.href = hasil.redirectUrl;
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-6">
-      <label className="flex flex-col gap-1">
-        <span className="text-sm font-medium">Nama pemesan</span>
-        <input
-          type="text"
-          value={namaPelanggan}
-          onChange={(e) => setNamaPelanggan(e.target.value)}
-          required
-          className="rounded border p-2"
-        />
-      </label>
+    <form onSubmit={handleSubmit} className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_350px] lg:items-start">
+      <div className="min-w-0 space-y-10">
+        <section aria-labelledby="paket-heading">
+          <div className="mb-4 flex items-end justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-800">KATALOG PAKET</p>
+              <h2 id="paket-heading" className="mt-1 text-2xl font-bold tracking-tight">Pilih barang paketan</h2>
+              <p className="mt-1 text-sm text-stone-500">Isi dan tarif paket bisa dilengkapi nanti; pelunasan dilakukan di toko.</p>
+            </div>
+          </div>
+          {!paketKatalogAktif ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-950">
+              Katalog barang satuan tetap bisa digunakan. Untuk mengaktifkan produk paket, jalankan
+              <code className="mx-1 rounded bg-white px-1.5 py-0.5">migrasi-backlog.sql</code> lalu
+              <code className="mx-1 rounded bg-white px-1.5 py-0.5">migrasi-katalog-paket.sql</code>
+              di Supabase.
+            </div>
+          ) : alatTerfilter.some((item) => item.jenis_barang === "paket") ? (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {alatTerfilter.filter((item) => item.jenis_barang === "paket").map((item) => (
+                <KartuProduk key={item.id} item={item} jumlah={jumlah[item.id] ?? 0} onUbah={(nilai) => { ubahJumlah(item.id, nilai); setPesan(null); }} />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-stone-300 bg-white p-8 text-center text-sm text-stone-500">
+              Produk paket belum ditambahkan ke katalog.
+            </div>
+          )}
 
-      <div className="grid grid-cols-2 gap-4">
-        <label className="flex flex-col gap-1">
-          <span className="text-sm font-medium">Tanggal mulai</span>
-          <input
-            type="date"
-            min={hariIni}
-            value={tanggalMulai}
-            onChange={(e) => {
-              setTanggalMulai(e.target.value);
-              if (tanggalSelesai < e.target.value) setTanggalSelesai(e.target.value);
-            }}
-            required
-            className="rounded border p-2"
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-sm font-medium">Tanggal selesai</span>
-          <input
-            type="date"
-            min={tanggalMulai || hariIni}
-            value={tanggalSelesai}
-            onChange={(e) => setTanggalSelesai(e.target.value)}
-            required
-            className="rounded border p-2"
-          />
-        </label>
+          {paketTerpilih && (
+            <div className="mt-4 rounded-2xl border border-emerald-900/10 bg-emerald-50/70 p-4 sm:flex sm:items-center sm:justify-between sm:gap-6">
+              <div>
+                <label htmlFor="jumlah-peserta" className="block text-sm font-bold text-stone-900">
+                  Jumlah pendaki untuk {paketTerpilih.nama}
+                </label>
+                <p className="mt-1 text-xs leading-5 text-stone-600">
+                  {jenisPaket === "rombongan"
+                    ? `Minimal ${Math.max(11, paketTerpilih.minimal_peserta)} orang untuk paket rombongan.`
+                    : "Masukkan jumlah orang yang ikut paket tektok."}
+                </p>
+              </div>
+              <div className="mt-3 flex items-center gap-3 sm:mt-0">
+                <input
+                  id="jumlah-peserta"
+                  type="number"
+                  min={jenisPaket === "rombongan" ? Math.max(11, paketTerpilih.minimal_peserta) : 1}
+                  step={1}
+                  value={jumlahPeserta}
+                  onChange={(event) => setJumlahPeserta(event.target.value)}
+                  className="w-28 rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-center font-semibold outline-none focus:border-emerald-800 focus:ring-2 focus:ring-emerald-800/15"
+                  required
+                />
+                <span className="text-sm text-stone-500">orang</span>
+              </div>
+              {paketRombonganBelumCukup && (
+                <p className="mt-2 text-sm font-medium text-red-700 sm:basis-full">
+                  Paket Rombongan bisa dipilih mulai {Math.max(11, paketTerpilih?.minimal_peserta ?? 11)} pendaki.
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+
+        <section aria-labelledby="alat-heading">
+          <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-800">KATALOG BARANG SATUAN</p>
+              <h2 id="alat-heading" className="mt-1 text-2xl font-bold tracking-tight">Pilih perlengkapan satuan</h2>
+              <p className="mt-1 text-sm text-stone-500">Tambahkan barang satuan jika diperlukan bersama paket atau booking satuan.</p>
+            </div>
+            <label className="relative block sm:w-64">
+              <span className="sr-only">Cari alat</span>
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" aria-hidden="true">⌕</span>
+              <input
+                type="search"
+                value={cari}
+                onChange={(event) => setCari(event.target.value)}
+                placeholder="Cari perlengkapan..."
+                className="w-full rounded-xl border border-stone-200 bg-white py-2.5 pl-9 pr-3 text-sm outline-none placeholder:text-stone-400 focus:border-emerald-800 focus:ring-2 focus:ring-emerald-800/10"
+              />
+            </label>
+          </div>
+
+          {alatTerfilter.filter((item) => item.jenis_barang === "satuan").length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-stone-300 bg-white p-10 text-center text-sm text-stone-500">
+              Barang satuan dengan nama “{cari}” tidak ditemukan.
+            </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {alatTerfilter.filter((item) => item.jenis_barang === "satuan").map((item) => (
+                <KartuProduk key={item.id} item={item} jumlah={jumlah[item.id] ?? 0} onUbah={(nilai) => ubahJumlah(item.id, nilai)} />
+              ))}
+            </div>
+          )}
+        </section>
       </div>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="font-semibold">Pilih alat</h2>
-        {alat.length === 0 && <p className="text-gray-600">Belum ada alat tersedia.</p>}
-        {alat.map((a) => (
-          <div key={a.id} className="flex items-center justify-between rounded border p-3">
-            <div>
-              <p className="font-medium">{a.nama}</p>
-              <p className="text-sm text-gray-600">
-                Rp{a.harga_sewa.toLocaleString("id-ID")} / hari · stok {a.stok_total}
-              </p>
-            </div>
-            <input
-              type="number"
-              min={0}
-              max={a.stok_total}
-              value={jumlah[a.id] ?? 0}
-              onChange={(e) => ubahJumlah(a.id, Number(e.target.value))}
-              className="w-20 rounded border p-2"
-            />
+      <aside className="lg:sticky lg:top-6">
+        <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
+          <div className="bg-emerald-950 px-5 py-4 text-white">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200">RINGKASAN</p>
+            <h2 className="mt-1 text-lg font-bold">Booking pendakian</h2>
           </div>
-        ))}
-      </section>
 
-      <section className="rounded border bg-gray-50 p-4" aria-live="polite">
-        <p className="font-medium">
-          Estimasi total sewa{lamaSewa > 0 ? ` · ${lamaSewa} hari` : ""}: Rp{estimasiTotal.toLocaleString("id-ID")}
-        </p>
-        <p className="mt-1 text-sm text-gray-600">
-          Harga dihitung per hari kalender, termasuk tanggal mulai dan tanggal selesai. Uang booking Rp20.000 dibayar online; sisa sewa dibayar di lokasi.
-        </p>
-      </section>
+          <div className="space-y-5 p-5">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-stone-500">Jenis pemesanan</p>
+              <p className="mt-1 font-bold text-stone-900">
+                {paketTerpilih?.nama ?? "Barang satuan"}
+              </p>
+              {paketTerpilih && (
+                <p className="mt-0.5 text-xs text-stone-500">{Number.isFinite(peserta) ? peserta : 0} pendaki</p>
+              )}
+            </div>
 
-      <label className="flex items-start gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={setujuKetentuan}
-          onChange={(e) => setSetujuKetentuan(e.target.checked)}
-          className="mt-1"
-        />
-        <span>
-          Saya sudah membaca dan menyetujui ketentuan sewa, termasuk aturan refund, denda, dan
-          konsekuensi pelanggaran.
-        </span>
-      </label>
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-semibold text-stone-700">Nama pemesan</span>
+              <input
+                type="text"
+                value={namaPelanggan}
+                onChange={(event) => setNamaPelanggan(event.target.value)}
+                placeholder="Nama lengkap"
+                required
+                className="w-full rounded-xl border border-stone-200 px-3 py-2.5 text-sm outline-none focus:border-emerald-800 focus:ring-2 focus:ring-emerald-800/10"
+              />
+            </label>
 
-      <button
-        type="submit"
-        disabled={loading || itemTerpilih.length === 0 || !setujuKetentuan}
-        className="rounded bg-black p-3 text-white disabled:opacity-50"
-      >
-        {loading ? "Memproses..." : "Booking sekarang"}
-      </button>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-semibold text-stone-700">Mulai sewa</span>
+                <input
+                  type="date"
+                  min={hariIni}
+                  value={tanggalMulai}
+                  onChange={(event) => {
+                    setTanggalMulai(event.target.value);
+                    if (tanggalSelesai < event.target.value) setTanggalSelesai(event.target.value);
+                  }}
+                  required
+                  className="w-full min-w-0 rounded-xl border border-stone-200 px-2 py-2.5 text-xs outline-none focus:border-emerald-800 focus:ring-2 focus:ring-emerald-800/10"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-semibold text-stone-700">Selesai sewa</span>
+                <input
+                  type="date"
+                  min={tanggalMulai || hariIni}
+                  value={tanggalSelesai}
+                  onChange={(event) => setTanggalSelesai(event.target.value)}
+                  required
+                  className="w-full min-w-0 rounded-xl border border-stone-200 px-2 py-2.5 text-xs outline-none focus:border-emerald-800 focus:ring-2 focus:ring-emerald-800/10"
+                />
+              </label>
+            </div>
 
-      {bookingId && (
-      <button
-      type="button"
-      onClick={handleBayar}
-      disabled={loading}
-      className="rounded bg-green-700 p-3 text-white disabled:opacity-50"
-      >
-      {loading ? "Memproses..." : "Bayar Rp20.000 sekarang"}
-      </button>
-      )}
+            <div className="border-t border-stone-100 pt-4">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wider text-stone-500">Alat dipilih</p>
+                <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-bold text-stone-600">{itemTerpilih.length} jenis</span>
+              </div>
+              {itemTerpilih.length === 0 ? (
+                <p className="rounded-xl bg-stone-50 px-3 py-3 text-xs leading-5 text-stone-500">Belum ada alat. Tambahkan perlengkapan dari katalog.</p>
+              ) : (
+                <ul className="max-h-36 space-y-2 overflow-y-auto pr-1">
+                  {itemTerpilih.map((pilihan) => {
+                    const item = alat.find((barang) => barang.id === pilihan.alatId);
+                    return (
+                      <li key={pilihan.alatId} className="flex items-start justify-between gap-3 text-xs">
+                        <span className="min-w-0 text-stone-700">{item?.nama} <span className="text-stone-400">× {pilihan.jumlah}</span></span>
+                        <span className="shrink-0 font-semibold text-stone-800">
+                          {item?.jenis_barang === "paket" ? "Tarif di toko" : rupiah((item?.harga_sewa ?? 0) * pilihan.jumlah * Math.max(lamaSewa, 1))}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
 
-      {pesan && (
-        <p className={pesan.tipe === "error" ? "text-red-600" : "text-green-700"}>
-          {pesan.teks}
-        </p>
-      )}
+            <div className="space-y-2 border-t border-stone-100 pt-4">
+              <div className="flex justify-between text-sm text-stone-600">
+                <span>Estimasi barang satuan{lamaSewa > 0 ? ` · ${lamaSewa} hari` : ""}</span>
+                <span className="font-semibold text-stone-900">{rupiah(estimasiTotal)}</span>
+              </div>
+              {paketTerpilih && (
+                <p className="rounded-xl bg-stone-50 px-3 py-2 text-[11px] leading-5 text-stone-600">
+                  Tarif dan isi paket {paketTerpilih.nama} dikonfirmasi di toko.
+                </p>
+              )}
+              <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
+                <div>
+                  <p className="text-xs font-bold text-amber-950">Booking online</p>
+                  <p className="text-[10px] text-amber-900/70">Sisa sewa dilunasi di toko</p>
+                </div>
+                <span className="font-extrabold text-amber-950">Rp20.000</span>
+              </div>
+            </div>
+
+            <label className="flex items-start gap-2 text-xs leading-5 text-stone-600">
+              <input
+                type="checkbox"
+                checked={setujuKetentuan}
+                onChange={(event) => setSetujuKetentuan(event.target.checked)}
+                className="mt-0.5 size-4 accent-emerald-900"
+              />
+              <span>Saya menyetujui ketentuan sewa, refund, dan denda.</span>
+            </label>
+
+            <button
+              type="submit"
+              disabled={loading || itemTerpilih.length === 0 || !setujuKetentuan || paketRombonganBelumCukup}
+              className="w-full rounded-xl bg-emerald-950 px-4 py-3.5 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {loading ? "Memproses..." : bookingId ? "Buat booking baru" : "Lanjut booking · Rp20.000"}
+            </button>
+
+            {bookingId && (
+              <button
+                type="button"
+                onClick={handleBayar}
+                disabled={loading}
+                className="w-full rounded-xl border border-emerald-900 px-4 py-3 text-sm font-bold text-emerald-950 transition hover:bg-emerald-50 disabled:opacity-50"
+              >
+                {loading ? "Membuka pembayaran..." : "Bayar uang booking sekarang"}
+              </button>
+            )}
+
+            {pesan && (
+              <p role="status" className={`rounded-xl px-3 py-2.5 text-xs leading-5 ${pesan.tipe === "error" ? "bg-red-50 text-red-800" : "bg-emerald-50 text-emerald-900"}`}>
+                {pesan.teks}
+              </p>
+            )}
+          </div>
+        </div>
+        <p className="mt-3 text-center text-[11px] leading-5 text-stone-500">Total sewa adalah estimasi berdasarkan harga alat saat ini. Pembayaran sewa diselesaikan di toko.</p>
+      </aside>
     </form>
   );
 }

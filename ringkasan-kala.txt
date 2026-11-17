@@ -111,13 +111,22 @@ TAHAP F: Form booking
 - src/app/(pelanggan)/booking/page.tsx: server component yang
   memanggil data alat dan membungkus form dengan Suspense.
 - src/app/(pelanggan)/booking/booking-form.tsx: client component
-  (nama pemesan, tanggal mulai dan selesai, jumlah per alat,
-  checkbox persetujuan).
+  dengan katalog kartu bergaya marketplace, pencarian alat, kontrol
+  jumlah, ringkasan pesanan, tanggal sewa, dan checkbox persetujuan.
 - src/app/(pelanggan)/booking/actions.ts: server action buatBooking.
   Alurnya: cek login → validasi input → ambil ketentuan terbaru →
   panggil RPC buat_booking_atomik untuk mengunci alat, memeriksa stok,
   menghitung total, dan membuat booking, item, serta persetujuan dalam
   satu transaksi. Harga berasal dari database.
+- Katalog dipisahkan menjadi barang satuan dan produk paket. File
+  supabase/migrasi-katalog-paket.sql menambahkan dua produk awal,
+  Paket Tektok dan Paket Rombongan (minimal 11 pendaki). Deskripsi,
+  tarif, dan stok dapat dilengkapi di tabel alat setelah daftar final
+  ditentukan. Tarif paket ditandai untuk konfirmasi di toko; uang
+  booking online tetap Rp20.000.
+- Dashboard admin membaca harga barang dari tabel alat agar tidak
+  bergantung pada kolom harga_barang_satuan yang belum tersedia di
+  database aktif.
 
 TAHAP G: Pembayaran Midtrans (Snap, QRIS)
 - src/lib/midtrans/config.ts: membaca env Midtrans.
@@ -287,6 +296,7 @@ Supabase:
   supabase/seed-ketentuan.sql
   supabase/seed-alat.sql
   supabase/migrasi-backlog.sql
+  supabase/migrasi-katalog-paket.sql
   supabase/cron-batas-bayar.sql
 
 Midtrans:

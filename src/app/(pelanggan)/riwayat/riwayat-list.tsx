@@ -10,6 +10,8 @@ type Booking = {
   status: string;
   tanggal_mulai: string;
   tanggal_selesai: string;
+  jenis_paket?: "alat_satuan" | "tektok" | "rombongan";
+  jumlah_peserta?: number;
   refund_jumlah: number | null;
   created_at: string;
 };
@@ -64,6 +66,12 @@ export default function RiwayatList({ bookings }: { bookings: Booking[] }) {
       {bookings.map((b) => (
         <div key={b.id} className="rounded border p-4">
           <p className="font-medium">{b.nama_pelanggan}</p>
+          {b.jenis_paket && b.jenis_paket !== "alat_satuan" && (
+            <p className="text-sm text-gray-600">
+              Paket {b.jenis_paket === "rombongan" ? "Rombongan" : "Tektok"}
+              {b.jumlah_peserta ? ` · ${b.jumlah_peserta} pendaki` : ""}
+            </p>
+          )}
           <p className="text-sm text-gray-600">
             {b.tanggal_mulai} s/d {b.tanggal_selesai} · status: {tampilStatus(b.status)}
           </p>

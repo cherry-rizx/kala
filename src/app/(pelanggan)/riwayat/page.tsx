@@ -16,12 +16,42 @@ async function DaftarRiwayat() {
   const supabase = await createSessionClient();
   const { data, error } = await supabase
     .from("booking")
-    .select("id, nama_pelanggan, status, tanggal_mulai, tanggal_selesai, refund_jumlah, created_at")
+    .select("id, nama_pelanggan, status, tanggal_mulai, tanggal_selesai, created_at")
     .order("created_at", { ascending: false });
 
   if (error) return <p className="text-red-600">Gagal memuat riwayat: {error.message}</p>;
 
-  return <RiwayatList bookings={data ?? []} />;
+  const refundById = new Map<string, number>();
+  if (data?.length) {
+    const { data: refundRows } = await supabase
+      .from("booking")
+      .select("id, refund_jumlah")
+      .in("id", data.map((booking) => booking.id));
+    for (const item of refundRows ?? []) refundById.set(item.id, Number(item.refund_jumlah ?? 0));
+  }
+  const paketById = new Map<string, { jenis: "alat_satuan" | "tektok" | "rombongan"; peserta: number }>();
+  if (data?.length) {
+    const { data: paketRows } = await supabase
+      .from("booking")
+      .select("id, jenis_paket, jumlah_peserta")
+      .in("id", data.map((booking) => booking.id));
+    for (const item of paketRows ?? []) {
+      if (["alat_satuan", "tektok", "rombongan"].includes(item.jenis_paket)) {
+        paketById.set(item.id, {
+          jenis: item.jenis_paket as "alat_satuan" | "tektok" | "rombongan",
+          peserta: Number(item.jumlah_peserta ?? 1),
+        });
+      }
+    }
+  }
+  const bookings = (data ?? []).map((booking) => ({
+    ...booking,
+    refund_jumlah: refundById.get(booking.id) ?? 0,
+    jenis_paket: paketById.get(booking.id)?.jenis,
+    jumlah_peserta: paketById.get(booking.id)?.peserta,
+  }));
+
+  return <RiwayatList bookings={bookings} />;
 }
 
 export default function RiwayatPage() {

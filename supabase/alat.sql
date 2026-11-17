@@ -5,6 +5,10 @@ create table if not exists public.alat (
   harga_sewa integer not null check (harga_sewa >= 0),
   harga_barang integer not null check (harga_barang >= 0), -- dasar perhitungan denda
   stok_total integer not null check (stok_total >= 0),
+  jenis_barang text not null default 'satuan' check (jenis_barang in ('satuan', 'paket')),
+  tipe_paket text check (tipe_paket is null or tipe_paket in ('tektok', 'rombongan')),
+  minimal_peserta integer not null default 1 check (minimal_peserta >= 1),
+  deskripsi text,
   aktif boolean not null default true,
   created_at timestamptz not null default now()
 );

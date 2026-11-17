@@ -58,7 +58,10 @@ export default function TombolKembali({
       {items.map((item) => (
         <div key={item.id} className="flex items-center justify-between gap-3 text-sm">
           <label htmlFor={`persen-${item.id}`}>
-            {item.nama} × {item.jumlah} · harga barang Rp{item.hargaBarang.toLocaleString("id-ID")}
+            {item.nama} × {item.jumlah}
+            {item.hargaBarang > 0
+              ? ` · harga barang Rp${item.hargaBarang.toLocaleString("id-ID")}`
+              : " · nilai paket belum diatur; penilaian denda dilakukan manual di toko"}
           </label>
           <div className="flex shrink-0 items-center gap-1">
             <input
@@ -69,9 +72,10 @@ export default function TombolKembali({
               step={1}
               value={persen[item.id] ?? 0}
               onChange={(e) => setPersen((prev) => ({ ...prev, [item.id]: Number(e.target.value) }))}
+              disabled={item.hargaBarang <= 0}
               className="w-20 rounded border p-1"
             />
-            <span>% rusak</span>
+            <span>{item.hargaBarang > 0 ? "% rusak" : "manual"}</span>
           </div>
         </div>
       ))}
