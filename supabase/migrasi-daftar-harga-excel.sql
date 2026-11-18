@@ -1,9 +1,14 @@
--- Jalankan setelah migrasi-backlog.sql dan migrasi-katalog-paket.sql.
+-- Jalankan setelah migrasi-backlog.sql. Kolom katalog paket dibuat di sini
+-- agar migrasi ini tetap bisa dijalankan bila migrasi-katalog-paket.sql terlewat.
 -- Mengimpor daftar harga dari Daftar_Harga_Sewa_Alat_Pendakian.xlsx.
 -- Stok paket tidak tersedia di Excel: paket dibuat dengan stok 0 sampai toko
 -- mengisi stok paket mandiri. Gas kaleng tidak dikelola stoknya di website.
 
 alter table public.alat
+  add column if not exists jenis_barang text not null default 'satuan',
+  add column if not exists tipe_paket text,
+  add column if not exists minimal_peserta integer not null default 1,
+  add column if not exists deskripsi text,
   add column if not exists kode_produk text,
   add column if not exists kategori text,
   add column if not exists skema_harga text not null default 'harian',
@@ -30,6 +35,10 @@ alter table public.alat add constraint alat_jenis_paket_cocok_check
     or (jenis_barang = 'paket' and tipe_paket is not null)
     or (jenis_barang = 'add_on' and tipe_paket is null)
   );
+
+alter table public.alat drop constraint if exists alat_paket_minimal_peserta_check;
+alter table public.alat add constraint alat_paket_minimal_peserta_check
+  check (minimal_peserta >= 1);
 
 alter table public.alat drop constraint if exists alat_skema_harga_check;
 alter table public.alat add constraint alat_skema_harga_check
