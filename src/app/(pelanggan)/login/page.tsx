@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { masuk } from "./actions";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
+  const router = useRouter();
+  const supabase = createClient();
   const [mode, setMode] = useState<"login" | "daftar">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -15,17 +18,21 @@ export default function LoginPage() {
     setLoading(true);
     setPesan(null);
 
-    try {
-      const hasil = await masuk(email, password, mode);
-      if (!hasil.ok) {
-        setPesan(hasil.error);
-        return;
-      }
-    } catch {
-      setPesan("Login gagal diproses. Periksa koneksi dan konfigurasi Supabase, lalu coba lagi.");
-    } finally {
-      setLoading(false);
+    const { data, error } =
+      mode === "login"
+        ? await supabase.auth.signInWithPassword({ email, password })
+        : await supabase.auth.signUp({ email, password });
+
+    setLoading(false);
+
+    if (error) {
+      setPesan(error.message);
+      return;
     }
+
+    const role = data.user?.app_metadata?.role;
+    router.push(role === "admin" ? "/admin" : "/booking");
+    router.refresh();
   }
 
   return (
