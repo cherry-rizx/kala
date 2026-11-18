@@ -1,11 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
-  const router = useRouter();
   const supabase = createClient();
   const [mode, setMode] = useState<"login" | "daftar">("login");
   const [email, setEmail] = useState("");
@@ -18,21 +16,33 @@ export default function LoginPage() {
     setLoading(true);
     setPesan(null);
 
-    const { data, error } =
-      mode === "login"
-        ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({ email, password });
+    try {
+      const { data, error } =
+        mode === "login"
+          ? await supabase.auth.signInWithPassword({ email: email.trim(), password })
+          : await supabase.auth.signUp({ email: email.trim(), password });
 
-    setLoading(false);
+      if (error) {
+        setPesan(error.message);
+        return;
+      }
 
-    if (error) {
-      setPesan(error.message);
-      return;
+      if (!data.session || !data.user) {
+        setPesan(
+          mode === "daftar"
+            ? "Akun dibuat, tetapi sesi belum aktif. Periksa email untuk menyelesaikan konfirmasi akun."
+            : "Login belum menghasilkan sesi. Pastikan akun sudah dikonfirmasi, lalu coba lagi."
+        );
+        return;
+      }
+
+      const role = data.user.app_metadata?.role;
+      window.location.assign(role === "admin" ? "/admin" : "/booking");
+    } catch {
+      setPesan("Tidak dapat menghubungi layanan login. Periksa koneksi, lalu coba lagi.");
+    } finally {
+      setLoading(false);
     }
-
-    const role = data.user?.app_metadata?.role;
-    router.push(role === "admin" ? "/admin" : "/booking");
-    router.refresh();
   }
 
   return (
