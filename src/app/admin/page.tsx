@@ -38,6 +38,12 @@ async function DaftarBooking() {
   const idItem = data.flatMap((booking) =>
     ((booking.items ?? []) as unknown as { id: string }[]).map((item) => item.id)
   );
+  const { data: skemaSnapshot } = idItem.length
+    ? await admin.from("booking_item").select("id, skema_harga, opsi_pilihan").in("id", idItem)
+    : { data: [] };
+  const skemaPerItem = new Map(
+    (skemaSnapshot ?? []).map((item) => [item.id, item.skema_harga as string])
+  );
   const { data: hargaSnapshot } = idItem.length
     ? await admin.from("booking_item").select("id, harga_barang_satuan").in("id", idItem)
     : { data: [] };
@@ -69,7 +75,12 @@ async function DaftarBooking() {
     <div className="mt-6 flex flex-col gap-3">
       {daftar.map((b) => {
         const lamaSewa = Math.max(1, Math.floor((Date.parse(`${b.tanggal_selesai}T00:00:00Z`) - Date.parse(`${b.tanggal_mulai}T00:00:00Z`)) / 86400000) + 1);
-        const estimasiSewa = (b.items ?? []).reduce((total, item) => total + Number(item.harga_satuan ?? 0) * item.jumlah * lamaSewa, 0);
+        const estimasiSewa = (b.items ?? []).reduce((total, item) => {
+          const skema = skemaPerItem.get(item.id) ?? "harian";
+          const hari = skema === "harian" ? lamaSewa : 1;
+          return total + Number(item.harga_satuan ?? 0) * item.jumlah * hari;
+        }, 0);
+        const nilaiGantiBelumDiatur = (b.items ?? []).some((item) => !hargaPerItem.get(item.id));
         const adaTarifBelumDiatur = (b.items ?? []).some((item) => Number(item.harga_satuan) === 0);
         const nilai = nilaiPerBooking.get(b.id) as { refund_jumlah?: number; denda_jumlah?: number } | undefined;
         const paket = paketPerBooking.get(b.id) as { jenis_paket?: string; jumlah_peserta?: number } | undefined;
@@ -80,7 +91,7 @@ async function DaftarBooking() {
           <p className="font-medium">{b.nama_pelanggan}</p>
           {paket?.jenis_paket && paket.jenis_paket !== "alat_satuan" && (
             <p className="text-sm text-gray-600">
-              Paket {paket.jenis_paket === "rombongan" ? "Rombongan" : "Tektok"}
+              Paket {paket.jenis_paket === "camp" ? "Camp" : paket.jenis_paket === "rombongan" ? "Rombongan" : "Tektok"}
               {paket.jumlah_peserta ? ` · ${paket.jumlah_peserta} pendaki` : ""}
             </p>
           )}
@@ -90,6 +101,7 @@ async function DaftarBooking() {
           <p className="text-sm text-gray-600">
             Estimasi sewa barang bertarif: Rp{estimasiSewa.toLocaleString("id-ID")}
           </p>
+          {nilaiGantiBelumDiatur && <p className="text-sm text-amber-700">Nilai barang untuk perhitungan denda belum diisi; lengkapi harga barang pengganti di tabel alat.</p>}
           {adaTarifBelumDiatur && <p className="text-sm text-amber-700">Ada barang paket yang tarifnya dikonfirmasi di toko.</p>}
           {refund > 0 ? (
             <p className="text-sm text-gray-600">Refund: Rp{refund.toLocaleString("id-ID")}</p>

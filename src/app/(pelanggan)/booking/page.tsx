@@ -14,7 +14,7 @@ async function FormBooking() {
   const supabase = await createSessionClient();
   const { data: katalog, error } = await supabase
     .from("alat")
-    .select("id, nama, harga_sewa, stok_total, jenis_barang, tipe_paket, minimal_peserta, deskripsi")
+    .select("id, nama, harga_sewa, stok_total, jenis_barang, tipe_paket, minimal_peserta, maksimal_peserta, deskripsi, kategori, skema_harga, stok_dikelola, durasi_hari, opsi_varian")
     .eq("aktif", true)
     .order("nama");
 
@@ -33,7 +33,13 @@ async function FormBooking() {
       jenis_barang: "satuan" as const,
       tipe_paket: null,
       minimal_peserta: 1,
+      maksimal_peserta: null,
       deskripsi: null,
+      kategori: null,
+      skema_harga: "harian" as const,
+      stok_dikelola: true,
+      durasi_hari: null,
+      opsi_varian: {} as Record<string, string[]>,
     }));
     return <BookingForm alat={alatSatuan} paketKatalogAktif={false} hariIni={hariIni} />;
   }

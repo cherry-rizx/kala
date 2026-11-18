@@ -7,19 +7,23 @@ import { getCurrentUser } from "@/lib/supabase/session";
 const BATAS_BAYAR_MENIT = 60; // asumsi sementara, nanti dikonfirmasi
 const BIAYA_BOOKING = 20000;
 
-type ItemBooking = { alatId: string; jumlah: number };
+type ItemBooking = { alatId: string; jumlah: number; opsiPilihan?: Record<string, string> };
 type ProdukBooking = {
   id: string;
   jenis_barang: string;
-  tipe_paket: string | null;
+  tipe_paket: "tektok" | "rombongan" | "camp" | null;
   minimal_peserta: number;
+  maksimal_peserta: number | null;
+  skema_harga: "harian" | "sekali_sewa" | "jual_putus" | "paket";
+  durasi_hari: number | null;
+  opsi_varian: Record<string, string[]>;
 };
 
 type InputBooking = {
   namaPelanggan: string;
   tanggalMulai: string; // format YYYY-MM-DD
   tanggalSelesai: string; // format YYYY-MM-DD
-  jenisPaket: "alat_satuan" | "tektok" | "rombongan";
+  jenisPaket: "alat_satuan" | "tektok" | "rombongan" | "camp";
   jumlahPeserta: number;
   items: ItemBooking[];
   setujuKetentuan: boolean;
@@ -76,7 +80,7 @@ export async function buatBooking(input: InputBooking): Promise<HasilBooking> {
   if (input.tanggalSelesai < input.tanggalMulai) {
     return { ok: false, error: "Tanggal selesai harus sama atau setelah tanggal mulai" };
   }
-  if (!["alat_satuan", "tektok", "rombongan"].includes(input.jenisPaket)
+  if (!["alat_satuan", "tektok", "rombongan", "camp"].includes(input.jenisPaket)
       || !Number.isInteger(input.jumlahPeserta) || input.jumlahPeserta < 1) {
     return { ok: false, error: "Pilihan paket atau jumlah pendaki tidak valid" };
   }
@@ -91,7 +95,7 @@ export async function buatBooking(input: InputBooking): Promise<HasilBooking> {
 
   const katalogPaket = await admin
     .from("alat")
-    .select("id, jenis_barang, tipe_paket, minimal_peserta")
+    .select("id, jenis_barang, tipe_paket, minimal_peserta, maksimal_peserta, skema_harga, durasi_hari, opsi_varian")
     .in("id", input.items.map((item) => item.alatId))
     .eq("aktif", true);
   let produk: ProdukBooking[];
@@ -110,6 +114,10 @@ export async function buatBooking(input: InputBooking): Promise<HasilBooking> {
       jenis_barang: "satuan",
       tipe_paket: null,
       minimal_peserta: 1,
+      maksimal_peserta: null,
+      skema_harga: "harian",
+      durasi_hari: null,
+      opsi_varian: {},
     }));
   } else {
     produk = (katalogPaket.data ?? []) as ProdukBooking[];
@@ -128,13 +136,32 @@ export async function buatBooking(input: InputBooking): Promise<HasilBooking> {
     if (!paket.tipe_paket || itemPaket?.jumlah !== 1) {
       return { ok: false, error: "Jumlah barang paketan tidak valid" };
     }
-    if (paket.tipe_paket === "rombongan" && input.jumlahPeserta < Math.max(11, paket.minimal_peserta)) {
-      return { ok: false, error: `Paket Rombongan tersedia mulai dari ${Math.max(11, paket.minimal_peserta)} pendaki` };
+    if (input.jumlahPeserta < paket.minimal_peserta || (paket.maksimal_peserta !== null && input.jumlahPeserta > paket.maksimal_peserta)) {
+      return { ok: false, error: `Jumlah pendaki untuk paket harus ${paket.maksimal_peserta === paket.minimal_peserta ? `tepat ${paket.minimal_peserta}` : `${paket.minimal_peserta}–${paket.maksimal_peserta ?? "seterusnya"}`}` };
     }
   }
   const jenisPaket = (produkPaket[0]?.tipe_paket ?? "alat_satuan") as InputBooking["jenisPaket"];
   if (input.jenisPaket !== jenisPaket) {
     return { ok: false, error: "Pilihan paket berubah. Muat ulang katalog." };
+  }
+  const lamaSewa = (Date.parse(`${input.tanggalSelesai}T00:00:00Z`) - Date.parse(`${input.tanggalMulai}T00:00:00Z`)) / 86400000 + 1;
+  for (const item of input.items) {
+    const product = produk.find((entry) => entry.id === item.alatId);
+    if (!product) return { ok: false, error: "Ada barang yang sudah tidak tersedia. Muat ulang katalog." };
+    if (product.skema_harga === "paket" && product.durasi_hari !== null && lamaSewa !== product.durasi_hari) {
+      return { ok: false, error: `Paket ini harus dibooking selama ${product.durasi_hari} hari` };
+    }
+    if (product.skema_harga === "sekali_sewa" && product.durasi_hari !== null && lamaSewa > product.durasi_hari) {
+      return { ok: false, error: `${product.id} hanya bisa disewa maksimal ${product.durasi_hari} hari per tarif` };
+    }
+    const requiredOptions = product.opsi_varian ?? {};
+    const selectedOptions = item.opsiPilihan ?? {};
+    for (const [nama, pilihan] of Object.entries(requiredOptions)) {
+      if (!pilihan.includes(selectedOptions[nama])) return { ok: false, error: `Pilih varian ${nama} untuk paket` };
+    }
+    if (Object.keys(selectedOptions).some((nama) => !(nama in requiredOptions))) {
+      return { ok: false, error: "Pilihan varian paket tidak valid" };
+    }
   }
 
   // 3. Ambil versi ketentuan terbaru
@@ -166,7 +193,7 @@ export async function buatBooking(input: InputBooking): Promise<HasilBooking> {
     p_ketentuan_id: ketentuan.id,
     p_ip_address: ip,
     p_user_agent: userAgent,
-    p_items: input.items.map((item) => ({ alat_id: item.alatId, jumlah: item.jumlah })),
+    p_items: input.items.map((item) => ({ alat_id: item.alatId, jumlah: item.jumlah, opsi_pilihan: item.opsiPilihan ?? {} })),
   });
   if (error?.code === "PGRST202" && produkPaket.length === 0) {
     // Signature RPC lama belum menerima metadata paket; booking satuan tetap berjalan.
@@ -180,7 +207,7 @@ export async function buatBooking(input: InputBooking): Promise<HasilBooking> {
       p_ketentuan_id: ketentuan.id,
       p_ip_address: ip,
       p_user_agent: userAgent,
-      p_items: input.items.map((item) => ({ alat_id: item.alatId, jumlah: item.jumlah })),
+      p_items: input.items.map((item) => ({ alat_id: item.alatId, jumlah: item.jumlah, opsi_pilihan: item.opsiPilihan ?? {} })),
     }));
   }
   if (error?.code === "PGRST202" && produkPaket.length > 0) {

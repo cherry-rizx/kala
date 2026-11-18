@@ -29,16 +29,16 @@ async function DaftarRiwayat() {
       .in("id", data.map((booking) => booking.id));
     for (const item of refundRows ?? []) refundById.set(item.id, Number(item.refund_jumlah ?? 0));
   }
-  const paketById = new Map<string, { jenis: "alat_satuan" | "tektok" | "rombongan"; peserta: number }>();
+  const paketById = new Map<string, { jenis: "alat_satuan" | "tektok" | "rombongan" | "camp"; peserta: number }>();
   if (data?.length) {
     const { data: paketRows } = await supabase
       .from("booking")
       .select("id, jenis_paket, jumlah_peserta")
       .in("id", data.map((booking) => booking.id));
     for (const item of paketRows ?? []) {
-      if (["alat_satuan", "tektok", "rombongan"].includes(item.jenis_paket)) {
+      if (["alat_satuan", "tektok", "rombongan", "camp"].includes(item.jenis_paket)) {
         paketById.set(item.id, {
-          jenis: item.jenis_paket as "alat_satuan" | "tektok" | "rombongan",
+          jenis: item.jenis_paket as "alat_satuan" | "tektok" | "rombongan" | "camp",
           peserta: Number(item.jumlah_peserta ?? 1),
         });
       }

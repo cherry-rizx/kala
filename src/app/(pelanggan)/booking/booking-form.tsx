@@ -9,13 +9,19 @@ type AlatItem = {
   nama: string;
   harga_sewa: number;
   stok_total: number;
-  jenis_barang: "satuan" | "paket";
-  tipe_paket: "tektok" | "rombongan" | null;
+  jenis_barang: "satuan" | "paket" | "add_on";
+  tipe_paket: "tektok" | "rombongan" | "camp" | null;
   minimal_peserta: number;
+  maksimal_peserta: number | null;
   deskripsi: string | null;
+  kategori: string | null;
+  skema_harga: "harian" | "sekali_sewa" | "jual_putus" | "paket";
+  stok_dikelola: boolean;
+  durasi_hari: number | null;
+  opsi_varian: Record<string, string[]>;
 };
 
-type JenisPaket = "alat_satuan" | "tektok" | "rombongan";
+type JenisPaket = "alat_satuan" | "tektok" | "rombongan" | "camp";
 
 function rupiah(nilai: number) {
   return `Rp${nilai.toLocaleString("id-ID")}`;
@@ -40,7 +46,7 @@ function KartuProduk({
   onUbah: (jumlah: number) => void;
 }) {
   const paket = item.jenis_barang === "paket";
-  const ikon = paket ? (item.tipe_paket === "rombongan" ? "🏕️" : "🥾") : ikonAlat(item.nama);
+  const ikon = paket ? (item.tipe_paket === "camp" || item.tipe_paket === "rombongan" ? "🏕️" : "🥾") : ikonAlat(item.nama);
   return (
     <article className={`group overflow-hidden rounded-2xl border bg-white transition hover:-translate-y-1 hover:shadow-lg ${jumlah > 0 ? "border-emerald-800 ring-1 ring-emerald-800" : "border-stone-200"}`}>
       <div className="relative flex h-36 items-center justify-center overflow-hidden bg-gradient-to-br from-emerald-50 via-stone-100 to-amber-50">
@@ -51,7 +57,9 @@ function KartuProduk({
       <div className="p-4">
         <div className="flex min-h-12 items-start justify-between gap-3">
           <h3 className="font-bold leading-5 text-stone-900">{item.nama}</h3>
-          <span className="shrink-0 rounded-full bg-stone-100 px-2 py-1 text-[10px] font-semibold text-stone-500">{item.stok_total} tersedia</span>
+          <span className="shrink-0 rounded-full bg-stone-100 px-2 py-1 text-[10px] font-semibold text-stone-500">
+            {item.stok_dikelola ? (item.stok_total > 0 ? `${item.stok_total} tersedia` : "Stok belum diatur") : "Stok toko"}
+          </span>
         </div>
         <p className="mt-1 text-xs text-stone-500">
           {paket
@@ -60,17 +68,10 @@ function KartuProduk({
         </p>
         <div className="mt-4 flex items-center justify-between gap-2 border-t border-stone-100 pt-3">
           <div>
-            {paket ? (
-              <>
-                <p className="text-sm font-bold text-emerald-950">Tarif di toko</p>
-                <p className="text-[11px] text-stone-500">Isi dan harga paket menyusul</p>
-              </>
-            ) : (
-              <>
-                <p className="text-lg font-extrabold tracking-tight text-emerald-950">{rupiah(item.harga_sewa)}</p>
-                <p className="text-[11px] text-stone-500">per unit / hari</p>
-              </>
-            )}
+            <p className="text-lg font-extrabold tracking-tight text-emerald-950">{rupiah(item.harga_sewa)}</p>
+            <p className="text-[11px] text-stone-500">
+              {item.skema_harga === "harian" ? "per unit / hari" : item.skema_harga === "sekali_sewa" ? `sekali sewa${item.durasi_hari ? ` · maks ${item.durasi_hari} hari` : ""}` : item.skema_harga === "paket" ? `${item.durasi_hari} hari · harga paket` : "beli putus · dibayar di toko"}
+            </p>
           </div>
           {paket ? (
             <button type="button" onClick={() => onUbah(jumlah > 0 ? 0 : 1)} disabled={item.stok_total < 1} className={`rounded-xl px-4 py-2.5 text-sm font-bold transition disabled:opacity-40 ${jumlah > 0 ? "border border-stone-300 text-stone-700" : "bg-emerald-950 text-white hover:bg-emerald-800"}`}>
@@ -80,7 +81,7 @@ function KartuProduk({
             <div className="flex items-center gap-2 rounded-xl border border-stone-200 p-1">
               <button type="button" aria-label={`Kurangi ${item.nama}`} onClick={() => onUbah(jumlah - 1)} disabled={jumlah <= 0} className="flex size-8 items-center justify-center rounded-lg text-lg font-semibold text-stone-600 transition hover:bg-stone-100 disabled:opacity-30">−</button>
               <span className="min-w-5 text-center text-sm font-bold tabular-nums">{jumlah}</span>
-              <button type="button" aria-label={`Tambah ${item.nama}`} onClick={() => onUbah(jumlah + 1)} disabled={jumlah >= item.stok_total} className="flex size-8 items-center justify-center rounded-lg bg-emerald-950 text-lg font-semibold text-white transition hover:bg-emerald-800 disabled:opacity-30">+</button>
+              <button type="button" aria-label={`Tambah ${item.nama}`} onClick={() => onUbah(jumlah + 1)} disabled={item.stok_dikelola ? jumlah >= item.stok_total : jumlah >= 50} className="flex size-8 items-center justify-center rounded-lg bg-emerald-950 text-lg font-semibold text-white transition hover:bg-emerald-800 disabled:opacity-30">+</button>
             </div>
           )}
         </div>
@@ -104,6 +105,7 @@ export default function BookingForm({
   const [tanggalSelesai, setTanggalSelesai] = useState("");
   const [namaPelanggan, setNamaPelanggan] = useState("");
   const [jumlah, setJumlah] = useState<Record<string, number>>({});
+  const [varianPilihan, setVarianPilihan] = useState<Record<string, Record<string, string>>>({});
   const [setujuKetentuan, setSetujuKetentuan] = useState(false);
   const [loading, setLoading] = useState(false);
   const [pesan, setPesan] = useState<{ tipe: "error" | "sukses"; teks: string } | null>(null);
@@ -115,7 +117,9 @@ export default function BookingForm({
   const peserta = Number(jumlahPeserta);
   const paketTerpilih = alat.find((item) => item.jenis_barang === "paket" && (jumlah[item.id] ?? 0) > 0);
   const jenisPaket: JenisPaket = paketTerpilih?.tipe_paket ?? "alat_satuan";
-  const paketRombonganBelumCukup = jenisPaket === "rombongan" && peserta < Math.max(11, paketTerpilih?.minimal_peserta ?? 11);
+  const pesertaMin = paketTerpilih?.minimal_peserta ?? 1;
+  const pesertaMax = paketTerpilih?.maksimal_peserta ?? null;
+  const paketRombonganBelumCukup = Boolean(paketTerpilih && (peserta < pesertaMin || (pesertaMax !== null && peserta > pesertaMax)));
 
   const alatTerfilter = useMemo(() => {
     const query = cari.trim().toLowerCase();
@@ -124,14 +128,21 @@ export default function BookingForm({
 
   const itemTerpilih = alat
     .filter((item) => (jumlah[item.id] ?? 0) > 0)
-    .map((item) => ({ alatId: item.id, jumlah: jumlah[item.id] }));
+    .map((item) => {
+      const pilihan = { ...(varianPilihan[item.id] ?? {}) };
+      for (const [nama, opsi] of Object.entries(item.opsi_varian ?? {})) {
+        if (!pilihan[nama] && opsi.length > 0) pilihan[nama] = opsi[0];
+      }
+      return { alatId: item.id, jumlah: jumlah[item.id], opsiPilihan: pilihan };
+    });
 
-  const estimasiTotal = lamaSewa > 0
-    ? itemTerpilih.reduce((total, pilihan) => {
-        const barang = alat.find((item) => item.id === pilihan.alatId);
-        return total + (barang?.harga_sewa ?? 0) * pilihan.jumlah * lamaSewa;
-      }, 0)
-    : 0;
+  const estimasiTotal = itemTerpilih.reduce((total, pilihan) => {
+    const barang = alat.find((item) => item.id === pilihan.alatId);
+    if (!barang) return total;
+    const jumlahHari = Math.max(lamaSewa, 1);
+    const harga = barang.skema_harga === "harian" ? barang.harga_sewa * jumlahHari : barang.harga_sewa;
+    return total + harga * pilihan.jumlah;
+  }, 0);
 
   function ubahJumlah(alatId: string, nilai: number) {
     const produk = alat.find((item) => item.id === alatId);
@@ -140,7 +151,7 @@ export default function BookingForm({
       ...(produk.jenis_barang === "paket"
         ? Object.fromEntries(alat.filter((item) => item.jenis_barang === "paket").map((item) => [item.id, 0]))
         : sebelumnya),
-      [alatId]: produk.jenis_barang === "paket" ? Math.min(1, Math.max(0, nilai)) : Math.min(produk.stok_total, Math.max(0, nilai)),
+      [alatId]: produk.jenis_barang === "paket" ? Math.min(1, Math.max(0, nilai)) : Math.min(produk.stok_dikelola ? produk.stok_total : 50, Math.max(0, nilai)),
     }));
   }
 
@@ -203,14 +214,14 @@ export default function BookingForm({
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-800">KATALOG PAKET</p>
               <h2 id="paket-heading" className="mt-1 text-2xl font-bold tracking-tight">Pilih barang paketan</h2>
-              <p className="mt-1 text-sm text-stone-500">Isi dan tarif paket bisa dilengkapi nanti; pelunasan dilakukan di toko.</p>
+              <p className="mt-1 text-sm text-stone-500">Harga paket mengikuti daftar harga; stok paket dihitung terpisah dari barang satuan.</p>
             </div>
           </div>
           {!paketKatalogAktif ? (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-950">
               Katalog barang satuan tetap bisa digunakan. Untuk mengaktifkan produk paket, jalankan
               <code className="mx-1 rounded bg-white px-1.5 py-0.5">migrasi-backlog.sql</code> lalu
-              <code className="mx-1 rounded bg-white px-1.5 py-0.5">migrasi-katalog-paket.sql</code>
+              <code className="mx-1 rounded bg-white px-1.5 py-0.5">migrasi-daftar-harga-excel.sql</code>
               di Supabase.
             </div>
           ) : alatTerfilter.some((item) => item.jenis_barang === "paket") ? (
@@ -232,16 +243,19 @@ export default function BookingForm({
                   Jumlah pendaki untuk {paketTerpilih.nama}
                 </label>
                 <p className="mt-1 text-xs leading-5 text-stone-600">
-                  {jenisPaket === "rombongan"
-                    ? `Minimal ${Math.max(11, paketTerpilih.minimal_peserta)} orang untuk paket rombongan.`
-                    : "Masukkan jumlah orang yang ikut paket tektok."}
+                  {pesertaMax === pesertaMin
+                    ? `Paket ini untuk ${pesertaMin} pendaki.`
+                    : pesertaMax
+                      ? `Paket ini untuk ${pesertaMin}–${pesertaMax} pendaki.`
+                      : `Minimal ${pesertaMin} pendaki.`}
                 </p>
               </div>
               <div className="mt-3 flex items-center gap-3 sm:mt-0">
                 <input
                   id="jumlah-peserta"
                   type="number"
-                  min={jenisPaket === "rombongan" ? Math.max(11, paketTerpilih.minimal_peserta) : 1}
+                  min={pesertaMin}
+                  max={pesertaMax ?? undefined}
                   step={1}
                   value={jumlahPeserta}
                   onChange={(event) => setJumlahPeserta(event.target.value)}
@@ -252,10 +266,35 @@ export default function BookingForm({
               </div>
               {paketRombonganBelumCukup && (
                 <p className="mt-2 text-sm font-medium text-red-700 sm:basis-full">
-                  Paket Rombongan bisa dipilih mulai {Math.max(11, paketTerpilih?.minimal_peserta ?? 11)} pendaki.
+                  Jumlah pendaki harus {pesertaMax === pesertaMin ? `tepat ${pesertaMin}` : `antara ${pesertaMin} dan ${pesertaMax ?? "seterusnya"}`} untuk paket ini.
                 </p>
               )}
             </div>
+          )}
+          {paketTerpilih && Object.keys(paketTerpilih.opsi_varian ?? {}).length > 0 && (
+            <div className="mt-3 grid gap-3 rounded-2xl border border-stone-200 bg-white p-4 sm:grid-cols-2">
+              {Object.entries(paketTerpilih.opsi_varian).map(([nama, opsi]) => (
+                <label key={nama} className="block text-sm font-semibold text-stone-800">
+                  {nama}
+                  <select
+                    value={varianPilihan[paketTerpilih.id]?.[nama] ?? opsi[0] ?? ""}
+                    onChange={(event) => setVarianPilihan((state) => ({
+                      ...state,
+                      [paketTerpilih.id]: { ...state[paketTerpilih.id], [nama]: event.target.value },
+                    }))}
+                    className="mt-1.5 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm font-normal"
+                    required
+                  >
+                    {opsi.map((nilai) => <option key={nilai} value={nilai}>{nilai}</option>)}
+                  </select>
+                </label>
+              ))}
+            </div>
+          )}
+          {paketTerpilih?.durasi_hari && lamaSewa > 0 && paketTerpilih.durasi_hari !== lamaSewa && (
+            <p className="mt-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Paket ini harus dibooking selama {paketTerpilih.durasi_hari} hari.
+            </p>
           )}
         </section>
 
@@ -291,6 +330,21 @@ export default function BookingForm({
             </div>
           )}
         </section>
+
+        {alatTerfilter.some((item) => item.jenis_barang === "add_on") && (
+          <section aria-labelledby="addon-heading">
+            <div className="mb-4">
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-800">TAMBAHAN BELI PUTUS</p>
+              <h2 id="addon-heading" className="mt-1 text-2xl font-bold tracking-tight">Add-on logistik</h2>
+              <p className="mt-1 text-sm text-stone-500">Tambahan masuk ke booking dan dibayar di toko.</p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {alatTerfilter.filter((item) => item.jenis_barang === "add_on").map((item) => (
+                <KartuProduk key={item.id} item={item} jumlah={jumlah[item.id] ?? 0} onUbah={(nilai) => ubahJumlah(item.id, nilai)} />
+              ))}
+            </div>
+          </section>
+        )}
       </div>
 
       <aside className="lg:sticky lg:top-6">
@@ -364,9 +418,12 @@ export default function BookingForm({
                     const item = alat.find((barang) => barang.id === pilihan.alatId);
                     return (
                       <li key={pilihan.alatId} className="flex items-start justify-between gap-3 text-xs">
-                        <span className="min-w-0 text-stone-700">{item?.nama} <span className="text-stone-400">× {pilihan.jumlah}</span></span>
+                        <span className="min-w-0 text-stone-700">
+                          {item?.nama} <span className="text-stone-400">× {pilihan.jumlah}</span>
+                          {Object.keys(pilihan.opsiPilihan).length > 0 && <span className="block text-[10px] text-stone-500">{Object.entries(pilihan.opsiPilihan).map(([nama, nilai]) => `${nama}: ${nilai}`).join(" · ")}</span>}
+                        </span>
                         <span className="shrink-0 font-semibold text-stone-800">
-                          {item?.jenis_barang === "paket" ? "Tarif di toko" : rupiah((item?.harga_sewa ?? 0) * pilihan.jumlah * Math.max(lamaSewa, 1))}
+                          {rupiah((item?.harga_sewa ?? 0) * pilihan.jumlah * (item?.skema_harga === "harian" ? Math.max(lamaSewa, 1) : 1))}
                         </span>
                       </li>
                     );
@@ -377,14 +434,9 @@ export default function BookingForm({
 
             <div className="space-y-2 border-t border-stone-100 pt-4">
               <div className="flex justify-between text-sm text-stone-600">
-                <span>Estimasi barang satuan{lamaSewa > 0 ? ` · ${lamaSewa} hari` : ""}</span>
+                <span>Estimasi sewa & add-on{lamaSewa > 0 ? ` · ${lamaSewa} hari` : ""}</span>
                 <span className="font-semibold text-stone-900">{rupiah(estimasiTotal)}</span>
               </div>
-              {paketTerpilih && (
-                <p className="rounded-xl bg-stone-50 px-3 py-2 text-[11px] leading-5 text-stone-600">
-                  Tarif dan isi paket {paketTerpilih.nama} dikonfirmasi di toko.
-                </p>
-              )}
               <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5">
                 <div>
                   <p className="text-xs font-bold text-amber-950">Booking online</p>
@@ -406,7 +458,7 @@ export default function BookingForm({
 
             <button
               type="submit"
-              disabled={loading || itemTerpilih.length === 0 || !setujuKetentuan || paketRombonganBelumCukup}
+              disabled={loading || itemTerpilih.length === 0 || !setujuKetentuan || paketRombonganBelumCukup || Boolean(paketTerpilih?.durasi_hari && lamaSewa > 0 && paketTerpilih.durasi_hari !== lamaSewa)}
               className="w-full rounded-xl bg-emerald-950 px-4 py-3.5 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-45"
             >
               {loading ? "Memproses..." : bookingId ? "Buat booking baru" : "Lanjut booking · Rp20.000"}
