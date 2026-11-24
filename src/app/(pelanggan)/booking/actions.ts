@@ -6,10 +6,14 @@ import { getCurrentUser } from "@/lib/supabase/session";
 
 const BATAS_BAYAR_MENIT = 60; // asumsi sementara, nanti dikonfirmasi
 const BIAYA_BOOKING = 20000;
+// Booking belum dibayar menahan stok sampai batas bayar; batasi per akun
+// agar satu pengguna tidak bisa mengunci seluruh stok tanpa membayar.
+const MAKS_BOOKING_BELUM_DIBAYAR = 3;
 
 type ItemBooking = { alatId: string; jumlah: number; opsiPilihan?: Record<string, string> };
 type ProdukBooking = {
   id: string;
+  nama: string;
   jenis_barang: string;
   tipe_paket: "tektok" | "rombongan" | "camp" | null;
   minimal_peserta: number;
@@ -27,6 +31,7 @@ type InputBooking = {
   jumlahPeserta: number;
   items: ItemBooking[];
   setujuKetentuan: boolean;
+  ketentuanId?: string; // versi ketentuan yang ditampilkan ke pelanggan
 };
 
 type HasilBooking =
@@ -93,9 +98,23 @@ export async function buatBooking(input: InputBooking): Promise<HasilBooking> {
 
   const admin = createAdminClient();
 
+  const { count: jumlahBelumDibayar, error: errBelumDibayar } = await admin
+    .from("booking")
+    .select("id", { count: "exact", head: true })
+    .eq("pelanggan_id", user.id)
+    .eq("status", "menunggu_bayar")
+    .gt("batas_bayar", new Date().toISOString());
+  if (errBelumDibayar) return { ok: false, error: "Gagal memeriksa booking aktif. Coba lagi." };
+  if ((jumlahBelumDibayar ?? 0) >= MAKS_BOOKING_BELUM_DIBAYAR) {
+    return {
+      ok: false,
+      error: `Anda masih punya ${jumlahBelumDibayar} booking yang belum dibayar. Bayar atau batalkan dulu di halaman Riwayat.`,
+    };
+  }
+
   const katalogPaket = await admin
     .from("alat")
-    .select("id, jenis_barang, tipe_paket, minimal_peserta, maksimal_peserta, skema_harga, durasi_hari, opsi_varian")
+    .select("id, nama, jenis_barang, tipe_paket, minimal_peserta, maksimal_peserta, skema_harga, durasi_hari, opsi_varian")
     .in("id", input.items.map((item) => item.alatId))
     .eq("aktif", true);
   let produk: ProdukBooking[];
@@ -103,7 +122,7 @@ export async function buatBooking(input: InputBooking): Promise<HasilBooking> {
     // Sebelum migrasi katalog, izinkan alur lama untuk barang satuan.
     const katalogLama = await admin
       .from("alat")
-      .select("id")
+      .select("id, nama")
       .in("id", input.items.map((item) => item.alatId))
       .eq("aktif", true);
     if (katalogLama.error || !katalogLama.data || katalogLama.data.length !== input.items.length) {
@@ -111,6 +130,7 @@ export async function buatBooking(input: InputBooking): Promise<HasilBooking> {
     }
     produk = katalogLama.data.map((item) => ({
       id: item.id,
+      nama: item.nama,
       jenis_barang: "satuan",
       tipe_paket: null,
       minimal_peserta: 1,
@@ -152,7 +172,7 @@ export async function buatBooking(input: InputBooking): Promise<HasilBooking> {
       return { ok: false, error: `Paket ini harus dibooking selama ${product.durasi_hari} hari` };
     }
     if (product.skema_harga === "sekali_sewa" && product.durasi_hari !== null && lamaSewa > product.durasi_hari) {
-      return { ok: false, error: `${product.id} hanya bisa disewa maksimal ${product.durasi_hari} hari per tarif` };
+      return { ok: false, error: `${product.nama} hanya bisa disewa maksimal ${product.durasi_hari} hari per tarif` };
     }
     const requiredOptions = product.opsi_varian ?? {};
     const selectedOptions = item.opsiPilihan ?? {};
@@ -168,11 +188,15 @@ export async function buatBooking(input: InputBooking): Promise<HasilBooking> {
   const { data: ketentuan, error: errKetentuan } = await admin
     .from("ketentuan")
     .select("id")
+    .lte("berlaku_sejak", new Date().toISOString())
     .order("berlaku_sejak", { ascending: false })
     .limit(1)
     .single();
   if (errKetentuan || !ketentuan) {
     return { ok: false, error: "Ketentuan belum tersedia" };
+  }
+  if (input.ketentuanId && input.ketentuanId !== ketentuan.id) {
+    return { ok: false, error: "Ketentuan sewa baru saja diperbarui. Muat ulang halaman dan baca ketentuan terbaru." };
   }
 
   // Harga, stok, booking, item, dan bukti persetujuan ditangani satu

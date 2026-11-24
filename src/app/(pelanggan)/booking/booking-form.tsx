@@ -22,6 +22,7 @@ type AlatItem = {
 };
 
 type JenisPaket = "alat_satuan" | "tektok" | "rombongan" | "camp";
+type Ketentuan = { id: string; versi: string; isi: string };
 
 function rupiah(nilai: number) {
   return `Rp${nilai.toLocaleString("id-ID")}`;
@@ -94,10 +95,12 @@ export default function BookingForm({
   alat,
   paketKatalogAktif,
   hariIni,
+  ketentuan,
 }: {
   alat: AlatItem[];
   paketKatalogAktif: boolean;
   hariIni: string;
+  ketentuan: Ketentuan | null;
 }) {
   const [jumlahPeserta, setJumlahPeserta] = useState("1");
   const [cari, setCari] = useState("");
@@ -147,6 +150,11 @@ export default function BookingForm({
   function ubahJumlah(alatId: string, nilai: number) {
     const produk = alat.find((item) => item.id === alatId);
     if (!produk) return;
+    // Paket punya batas jumlah pendaki sendiri; mulai dari nilai minimalnya
+    // agar tombol booking tidak langsung terkunci (mis. paket 4–5 orang).
+    if (produk.jenis_barang === "paket" && nilai > 0) {
+      setJumlahPeserta(String(produk.minimal_peserta));
+    }
     setJumlah((sebelumnya) => ({
       ...(produk.jenis_barang === "paket"
         ? Object.fromEntries(alat.filter((item) => item.jenis_barang === "paket").map((item) => [item.id, 0]))
@@ -169,6 +177,7 @@ export default function BookingForm({
         jumlahPeserta: paketTerpilih ? peserta : 1,
         items: itemTerpilih,
         setujuKetentuan,
+        ketentuanId: ketentuan?.id,
       });
 
       if (!hasil.ok) {
@@ -446,6 +455,21 @@ export default function BookingForm({
               </div>
             </div>
 
+            {ketentuan ? (
+              <details className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-700">
+                <summary className="cursor-pointer font-semibold text-stone-800">
+                  Baca ketentuan sewa (versi {ketentuan.versi})
+                </summary>
+                <div className="mt-2 max-h-60 overflow-y-auto whitespace-pre-line leading-5">
+                  {ketentuan.isi.trim()}
+                </div>
+              </details>
+            ) : (
+              <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                Ketentuan sewa belum tersedia; booking belum dapat dibuat.
+              </p>
+            )}
+
             <label className="flex items-start gap-2 text-xs leading-5 text-stone-600">
               <input
                 type="checkbox"
@@ -458,7 +482,7 @@ export default function BookingForm({
 
             <button
               type="submit"
-              disabled={loading || itemTerpilih.length === 0 || !setujuKetentuan || paketRombonganBelumCukup || Boolean(paketTerpilih?.durasi_hari && lamaSewa > 0 && paketTerpilih.durasi_hari !== lamaSewa)}
+              disabled={loading || !ketentuan || itemTerpilih.length === 0 || !setujuKetentuan || paketRombonganBelumCukup || Boolean(paketTerpilih?.durasi_hari && lamaSewa > 0 && paketTerpilih.durasi_hari !== lamaSewa)}
               className="w-full rounded-xl bg-emerald-950 px-4 py-3.5 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-45"
             >
               {loading ? "Memproses..." : bookingId ? "Buat booking baru" : "Lanjut booking · Rp20.000"}

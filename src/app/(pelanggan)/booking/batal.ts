@@ -3,6 +3,7 @@
 import { createSessionClient, getCurrentUser } from "@/lib/supabase/session";
 import { createAdminClient } from "@/lib/supabase/server";
 import { hitungRefund } from "@/lib/booking/rules";
+import { kedaluwarsakanTransaksiMidtrans } from "@/lib/midtrans/status";
 
 type HasilBatal =
   | { ok: true; status: "dibatalkan" | "hangus" | "menunggu_refund"; refund: number }
@@ -54,6 +55,15 @@ export async function batalkanBooking(bookingId: string): Promise<HasilBatal> {
   if (errUpdate) return { ok: false, error: "Gagal membatalkan booking" };
   if (!updated || updated.length === 0) {
     return { ok: false, error: "Booking tidak berubah, muat ulang halaman" };
+  }
+
+  if (booking.status === "menunggu_bayar") {
+    const { data: pending } = await admin
+      .from("booking_pembayaran")
+      .select("order_id")
+      .eq("booking_id", booking.id)
+      .eq("status", "pending");
+    await Promise.all((pending ?? []).map((p) => kedaluwarsakanTransaksiMidtrans(p.order_id)));
   }
 
   return { ok: true, status: statusBaru, refund };

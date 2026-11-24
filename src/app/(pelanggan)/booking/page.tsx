@@ -12,6 +12,15 @@ async function FormBooking() {
   const hariIni = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
 
   const supabase = await createSessionClient();
+  const { data: ketentuanAktif } = await supabase
+    .from("ketentuan")
+    .select("id, versi, isi")
+    .lte("berlaku_sejak", new Date().toISOString())
+    .order("berlaku_sejak", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const ketentuan = ketentuanAktif ?? null;
+
   const { data: katalog, error } = await supabase
     .from("alat")
     .select("id, nama, harga_sewa, stok_total, jenis_barang, tipe_paket, minimal_peserta, maksimal_peserta, deskripsi, kategori, skema_harga, stok_dikelola, durasi_hari, opsi_varian")
@@ -41,10 +50,10 @@ async function FormBooking() {
       durasi_hari: null,
       opsi_varian: {} as Record<string, string[]>,
     }));
-    return <BookingForm alat={alatSatuan} paketKatalogAktif={false} hariIni={hariIni} />;
+    return <BookingForm alat={alatSatuan} paketKatalogAktif={false} hariIni={hariIni} ketentuan={ketentuan} />;
   }
 
-  return <BookingForm alat={katalog ?? []} paketKatalogAktif hariIni={hariIni} />;
+  return <BookingForm alat={katalog ?? []} paketKatalogAktif hariIni={hariIni} ketentuan={ketentuan} />;
 }
 
 export default function BookingPage() {

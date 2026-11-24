@@ -24,10 +24,21 @@ export async function proxy(request: NextRequest) {
   );
 
   // Memanggil getUser memastikan session disegarkan dan cookie-nya ikut terkirim
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  // Pengguna yang sudah login tidak perlu melihat form login lagi.
+  if (user && request.nextUrl.pathname === "/login") {
+    const tujuan = request.nextUrl.clone();
+    tujuan.pathname = user.app_metadata?.role === "admin" ? "/admin" : "/booking";
+    const redirect = NextResponse.redirect(tujuan);
+    response.cookies.getAll().forEach((cookie) => redirect.cookies.set(cookie));
+    return redirect;
+  }
   return response;
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/webhook).*)"],
 };

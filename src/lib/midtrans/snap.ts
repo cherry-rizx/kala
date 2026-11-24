@@ -12,6 +12,10 @@ type ParamTransaksi = {
   jumlah: number;
   namaPelanggan: string;
   email: string;
+  // Transaksi tidak boleh bisa dibayar setelah batas bayar booking lewat.
+  batasBayar?: Date | null;
+  // Halaman tujuan setelah pelanggan selesai di halaman pembayaran Midtrans.
+  finishUrl?: string | null;
 };
 
 export async function buatTransaksiSnap(p: ParamTransaksi) {
@@ -27,6 +31,15 @@ export async function buatTransaksiSnap(p: ParamTransaksi) {
     item_details: [
       { id: "BOOKING", price: p.jumlah, quantity: 1, name: "Uang booking KALA" },
     ],
+    ...(p.batasBayar
+      ? {
+          expiry: {
+            unit: "minute",
+            duration: Math.max(1, Math.floor((p.batasBayar.getTime() - Date.now()) / 60000)),
+          },
+        }
+      : {}),
+    ...(p.finishUrl ? { callbacks: { finish: p.finishUrl } } : {}),
   };
 
   const transaksi = await snap.createTransaction(

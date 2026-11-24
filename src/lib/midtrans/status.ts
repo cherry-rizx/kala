@@ -8,6 +8,8 @@ const BASE = midtransConfig.isProduction
 export type StatusMidtrans = {
   status_code?: string | number;
   order_id?: string;
+  transaction_id?: string;
+  payment_type?: string;
   transaction_status: string;
   refund_amount?: string | number;
   gross_amount?: string | number;
@@ -20,6 +22,8 @@ export async function cekStatusMidtrans(orderId: string): Promise<StatusMidtrans
     const res = await fetch(`${BASE}/v2/${encodeURIComponent(orderId)}/status`, {
       headers: { Accept: "application/json", Authorization: `Basic ${auth}` },
       cache: "no-store",
+      // Halaman riwayat menunggu pemanggilan ini; jangan biarkan menggantung.
+      signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) return null;
 
@@ -33,11 +37,30 @@ export async function cekStatusMidtrans(orderId: string): Promise<StatusMidtrans
   }
 }
 
+// Menutup transaksi pending agar QR tidak bisa dibayar lagi, misalnya
+// setelah pelanggan membatalkan booking. Gagal di sini tidak fatal:
+// pembayaran yang tetap masuk akan diarahkan ke antrian refund.
+export async function kedaluwarsakanTransaksiMidtrans(orderId: string): Promise<boolean> {
+  if (!midtransConfig.serverKey) return false;
+  const auth = Buffer.from(`${midtransConfig.serverKey}:`).toString("base64");
+  try {
+    const res = await fetch(`${BASE}/v2/${encodeURIComponent(orderId)}/expire`, {
+      method: "POST",
+      headers: { Accept: "application/json", Authorization: `Basic ${auth}` },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function terapkanStatusMidtrans(orderId: string, status: StatusMidtrans) {
   const admin = createAdminClient();
   const { data: pembayaran } = await admin
     .from("booking_pembayaran")
-    .select("order_id, booking_id, jumlah, transaction_status")
+    .select("order_id, booking_id, jumlah, status, transaction_status")
     .eq("order_id", orderId)
     .maybeSingle();
   if (!pembayaran) return;
@@ -66,12 +89,28 @@ export async function terapkanStatusMidtrans(orderId: string, status: StatusMidt
             ? "gagal"
             : "pending";
 
-  await admin
-    .from("booking_pembayaran")
-    .update({ status: statusPercobaan, transaction_status: transactionStatus, updated_at: sekarang })
-    .eq("order_id", orderId);
+  // Notifikasi bisa datang tidak berurutan atau dikirim ulang oleh Midtrans.
+  // "pending" yang terlambat tidak boleh menimpa percobaan yang sudah final,
+  // dan "settlement" duplikat tidak boleh menimpa percobaan yang sudah di-refund.
+  const statusSebelumnya = pembayaran.status as string;
+  const sudahFinal = !["dibuat", "pending"].includes(statusSebelumnya);
+  const sudahDibayar = ["berhasil", "refund", "partial_refund"].includes(statusSebelumnya);
+  if (statusPercobaan === "berhasil" && (statusSebelumnya === "refund" || statusSebelumnya === "partial_refund")) {
+    return;
+  }
+  if (!(statusPercobaan === "pending" && sudahFinal)) {
+    await admin
+      .from("booking_pembayaran")
+      .update({ status: statusPercobaan, transaction_status: transactionStatus, updated_at: sekarang })
+      .eq("order_id", orderId);
+  }
 
   if (transactionStatus === "settlement" || transactionStatus === "capture") {
+    // Settlement untuk order ini sudah pernah diproses. Booking yang sejak itu
+    // berubah (mis. hangus karena batal < H-8 atau no-show) jangan dipindah
+    // ke antrian refund hanya karena notifikasi yang sama datang lagi.
+    if (sudahDibayar && booking.status !== "menunggu_bayar") return;
+
     const batasLewat = booking.batas_bayar && new Date(booking.batas_bayar).getTime() <= Date.now();
     if (booking.status === "menunggu_bayar" && !batasLewat) {
       await admin
@@ -135,18 +174,23 @@ export async function terapkanStatusMidtrans(orderId: string, status: StatusMidt
   }
 }
 
-export async function sinkronkanBookingMenunggu() {
+// Hanya menyinkronkan order milik pelanggan yang sedang membuka halaman,
+// agar satu kunjungan tidak memicu puluhan panggilan API untuk user lain.
+export async function sinkronkanBookingMenunggu(pelangganId: string) {
   const admin = createAdminClient();
   const { data: daftar, error } = await admin
     .from("booking_pembayaran")
-    .select("order_id")
+    .select("order_id, booking:booking_id!inner(pelanggan_id)")
+    .eq("booking.pelanggan_id", pelangganId)
     .in("status", ["dibuat", "pending"])
     .order("created_at", { ascending: false })
-    .limit(100);
+    .limit(20);
   if (error) return;
 
-  for (const pembayaran of daftar ?? []) {
-    const status = await cekStatusMidtrans(pembayaran.order_id);
-    if (status) await terapkanStatusMidtrans(pembayaran.order_id, status);
-  }
+  await Promise.all(
+    (daftar ?? []).map(async (pembayaran) => {
+      const status = await cekStatusMidtrans(pembayaran.order_id);
+      if (status) await terapkanStatusMidtrans(pembayaran.order_id, status);
+    })
+  );
 }
