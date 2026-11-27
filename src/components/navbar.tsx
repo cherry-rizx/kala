@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
+import { connection } from "next/server";
 import { getCurrentUser } from "@/lib/supabase/session";
 import { logout } from "@/app/auth-actions";
 
@@ -7,6 +8,11 @@ import { logout } from "@/app/auth-actions";
 // akses itu harus berada di dalam <Suspense> agar route lain tetap bisa
 // diprerender (termasuk /_not-found).
 async function MenuNavbar() {
+  // Tandai render ini sebagai request-time. Tanpa ini, prerender (termasuk
+  // partial prefetch yang sudah punya cookie) ikut menjalankan getUser(),
+  // yang memanggil Date.now() di dalam Supabase dan memicu error
+  // "blocking-prerender-current-time".
+  await connection();
   const user = await getCurrentUser();
   const isAdmin = user?.app_metadata?.role === "admin";
 

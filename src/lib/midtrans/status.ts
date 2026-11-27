@@ -13,7 +13,16 @@ export type StatusMidtrans = {
   transaction_status: string;
   refund_amount?: string | number;
   gross_amount?: string | number;
+  transaction_time?: string;
+  settlement_time?: string;
 };
+
+// Midtrans mengirim waktu dalam format "YYYY-MM-DD HH:mm:ss" zona WIB (GMT+7).
+function parseWaktuMidtrans(nilai: string | undefined): number | null {
+  if (!nilai || !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(nilai)) return null;
+  const waktu = Date.parse(`${nilai.replace(" ", "T")}+07:00`);
+  return Number.isFinite(waktu) ? waktu : null;
+}
 
 export async function cekStatusMidtrans(orderId: string): Promise<StatusMidtrans | null> {
   if (!midtransConfig.serverKey) return null;
@@ -71,7 +80,7 @@ export async function terapkanStatusMidtrans(orderId: string, status: StatusMidt
 
   const { data: booking } = await admin
     .from("booking")
-    .select("id, status, jumlah_booking, batas_bayar")
+    .select("id, status, jumlah_booking, batas_bayar, refund_jumlah, updated_at")
     .eq("id", pembayaran.booking_id)
     .maybeSingle();
   if (!booking) return;
@@ -111,14 +120,37 @@ export async function terapkanStatusMidtrans(orderId: string, status: StatusMidt
     // ke antrian refund hanya karena notifikasi yang sama datang lagi.
     if (sudahDibayar && booking.status !== "menunggu_bayar") return;
 
-    const batasLewat = booking.batas_bayar && new Date(booking.batas_bayar).getTime() <= Date.now();
+    // Tepat waktu atau tidak ditentukan dari waktu pembayaran di Midtrans,
+    // bukan waktu notifikasi diterima: webhook bisa terlambat berjam-jam.
+    const batas = booking.batas_bayar ? new Date(booking.batas_bayar).getTime() : null;
+    const waktuBayar = parseWaktuMidtrans(status.settlement_time ?? status.transaction_time);
+    const batasLewat = batas !== null && batas <= Date.now();
+    const dibayarTepatWaktu = batas === null || (waktuBayar ?? Date.now()) <= batas;
+    // Dibatalkan cron (bukan oleh pelanggan): pembatalan tercatat setelah batas bayar.
+    const dibatalkanOtomatis =
+      booking.status === "dibatalkan"
+      && Number(booking.refund_jumlah ?? 0) === 0
+      && batas !== null
+      && new Date(booking.updated_at).getTime() >= batas;
+
     if (booking.status === "menunggu_bayar" && !batasLewat) {
       await admin
         .from("booking")
         .update({ status: "terkonfirmasi", updated_at: sekarang })
         .eq("id", booking.id)
         .eq("status", "menunggu_bayar");
-    } else if (["menunggu_bayar", "dibatalkan", "hangus"].includes(booking.status)) {
+      return;
+    }
+
+    if (dibayarTepatWaktu && (booking.status === "menunggu_bayar" || dibatalkanOtomatis)) {
+      // Stok booking ini sudah dilepas; pulihkan hanya jika stok masih cukup.
+      const { data: pulih, error: errPulih } = await admin.rpc("pulihkan_booking_terbayar", {
+        p_booking_id: booking.id,
+      });
+      if (!errPulih && pulih === true) return;
+    }
+
+    if (["menunggu_bayar", "dibatalkan", "hangus"].includes(booking.status)) {
       // Pembayaran yang masuk setelah pembatalan harus dikembalikan, bukan
       // menghidupkan kembali reservasi alat yang sudah dilepas.
       await admin
